@@ -19,11 +19,23 @@ export function Footer() {
             </p>
           </div>
           <nav aria-label="Footer" className="footer-nav">
-            <a href="https://discord.gg/gHN7c9B5FU" target="_blank" rel="noopener" className="footer-discord">
+            <a
+              href="https://discord.gg/gHN7c9B5FU"
+              target="_blank"
+              rel="noopener"
+              className="footer-discord pp-tip pp-tip--up"
+              data-tooltip="Get help on the PluginPulse Discord"
+            >
               <DiscordIcon />
               Support ↗
             </a>
-            <a href="https://ko-fi.com/mark7625" target="_blank" rel="noopener" className="footer-kofi">
+            <a
+              href="https://ko-fi.com/mark7625"
+              target="_blank"
+              rel="noopener"
+              className="footer-kofi pp-tip pp-tip--up"
+              data-tooltip="Support PluginPulse on Ko-fi"
+            >
               <CoffeeIcon />
               Buy me a coffee ↗
             </a>

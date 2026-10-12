@@ -568,6 +568,20 @@ body {
   transition-delay: 0.3s;
 }
 
+/* Flips the tooltip above the element instead of below -- for anything
+   near the bottom of the viewport (the footer), where a downward tooltip
+   would otherwise run off-screen. */
+.pp-tip--up::after {
+  top: auto;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%) translateY(4px);
+}
+
+.pp-tip--up:hover::after,
+.pp-tip--up:focus-visible::after {
+  transform: translateX(-50%) translateY(0);
+}
+
 /* mobile top bar (<1000px): three round icon buttons replace the whole
    .pp-actions group -- see the breakpoints below. */
 .pp-mobile {
