@@ -111,16 +111,15 @@ export function Header() {
 
         <div className="pp-actions">
           <a
-            className="pp-discord"
+            className="pp-discord pp-tip"
             href="https://discord.gg/gHN7c9B5FU"
             target="_blank"
             rel="noopener"
-            title="Join the PluginPulse Discord"
-            aria-label="Join the PluginPulse Discord"
+            data-tooltip="Add the PluginPulse bot to your Discord server"
+            aria-label="Add the PluginPulse bot to your Discord server"
           >
-            <PlusIcon />
-            <span className="pp-discord__long">Join Discord</span>
-            <span className="pp-discord__short">Discord</span>
+            <DiscordIcon />
+            Add to Discord
           </a>
           <span className="pp-divider" aria-hidden="true" />
 
@@ -193,11 +192,11 @@ export function Header() {
             })}
             <a className="pp-drawer__discord" href="https://discord.gg/gHN7c9B5FU" target="_blank" rel="noopener">
               <span className="pp-drawer__plus">
-                <PlusIcon />
+                <DiscordIcon />
               </span>
               <span>
-                <b>Join Discord</b>
-                <small>Chat with the PluginPulse community</small>
+                <b>Add to Discord</b>
+                <small>Add the PluginPulse bot to your server</small>
               </span>
             </a>
             <a className="pp-drawer__discord pp-drawer__coffee" href="https://ko-fi.com/mark7625" target="_blank" rel="noopener">
@@ -252,10 +251,13 @@ export function Header() {
   );
 }
 
-function PlusIcon() {
+function DiscordIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-      <path d="M6 1.5v9M1.5 6h9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2 4.6c0-1.16.94-2.1 2.1-2.1h7.8c1.16 0 2.1.94 2.1 2.1V9.4c0 1.16-.94 2.1-2.1 2.1H7l-2.8 2.6v-2.6H4.1C2.94 11.5 2 10.56 2 9.4V4.6Z" />
+      <circle cx="5.6" cy="7" r="0.55" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="7" r="0.55" fill="currentColor" stroke="none" />
+      <circle cx="10.4" cy="7" r="0.55" fill="currentColor" stroke="none" />
     </svg>
   );
 }

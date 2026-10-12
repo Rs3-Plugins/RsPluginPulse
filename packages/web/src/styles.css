@@ -488,8 +488,9 @@ body {
   background: var(--hover);
 }
 
-.pp-discord__short {
-  display: none;
+.pp-discord svg {
+  display: block;
+  flex: none;
 }
 
 /* generic transparent icon/text button shared by the randomizer, coffee
@@ -618,15 +619,6 @@ body {
   height: 40px;
   border: 1px solid var(--line2);
   border-radius: 999px;
-}
-
-@media (max-width: 1239px) {
-  .pp-discord__long {
-    display: none;
-  }
-  .pp-discord__short {
-    display: inline;
-  }
 }
 
 @media (max-width: 999px) {
