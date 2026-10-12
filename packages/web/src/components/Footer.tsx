@@ -13,20 +13,18 @@ export function Footer() {
             <span className="brand-font footer-wordmark">
               Plugin<span className="brand-pulse">Pulse</span>
             </span>
-            <div className="footer-disclaimer-row">
-              <p className="site-footer-disclaimer">
-                RuneScape PluginPulse is a fan-made project and is not affiliated with, endorsed or sponsored by Jagex Ltd.
-                RuneScape and Jagex are trademarks of Jagex Ltd. Plugin data is sourced from mod.io.
-              </p>
-              <a href="https://ko-fi.com/mark7625" target="_blank" rel="noopener" className="footer-kofi">
-                <CoffeeIcon />
-                Buy me a coffee ↗
-              </a>
-            </div>
+            <p className="site-footer-disclaimer">
+              RuneScape PluginPulse is a fan-made project and is not affiliated with, endorsed or sponsored by Jagex Ltd. RuneScape
+              and Jagex are trademarks of Jagex Ltd. Plugin data is sourced from mod.io.
+            </p>
           </div>
           <nav aria-label="Footer" className="footer-nav">
             <a href="https://discord.gg/gHN7c9B5FU" target="_blank" rel="noopener" className="footer-discord">
               Join our Discord ↗
+            </a>
+            <a href="https://ko-fi.com/mark7625" target="_blank" rel="noopener" className="footer-kofi">
+              <CoffeeIcon />
+              Buy me a coffee ↗
             </a>
             <button className="footer-link" onClick={() => setLegalDoc("cookies")}>
               Cookie policy
