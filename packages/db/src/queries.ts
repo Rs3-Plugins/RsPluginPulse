@@ -1,6 +1,6 @@
 import { randomBytes } from "crypto";
 import { getPool } from "./client";
-import { slugify } from "./slug";
+import { normalizeSlug, slugify } from "./slug";
 import type {
   AuthorLeaderboardRow,
   AuthorProfile,
@@ -1296,7 +1296,16 @@ export async function getCompareData(type: CompareType, keys: number[], metric: 
 export async function getPluginIdByNameId(nameId: string, game: string): Promise<number | null> {
   const pool = getPool();
   const { rows } = await pool.query(`SELECT id FROM plugins WHERE game = $1 AND name_id = $2`, [game, nameId]);
-  return rows[0]?.id ?? null;
+  if (rows[0]) return rows[0].id;
+
+  // Fall back to a punctuation/whitespace-insensitive match -- "117 hd" or
+  // "117_HD" should still resolve to "117hd" the same as a correctly
+  // formatted link would, rather than 404ing over a hand-typed URL's
+  // formatting alone.
+  const target = normalizeSlug(nameId);
+  if (!target) return null;
+  const { rows: all } = await pool.query(`SELECT id, name_id FROM plugins WHERE game = $1`, [game]);
+  return all.find((r) => normalizeSlug(r.name_id) === target)?.id ?? null;
 }
 
 // Authors have no stored slug (author info is denormalized across
@@ -1316,6 +1325,12 @@ export async function getAuthorIdBySlug(slug: string, game: string): Promise<num
      ORDER BY pa.author_id ASC`,
     [game],
   );
-  const match = rows.find((r) => slugify(r.author_name) === slug);
-  return match?.author_id ?? null;
+  const exact = rows.find((r) => slugify(r.author_name) === slug);
+  if (exact) return exact.author_id;
+
+  // Same punctuation/whitespace-insensitive fallback as plugins -- "jin
+  // jiyunsun" (a space, not the canonical hyphen) should still resolve.
+  const target = normalizeSlug(slug);
+  if (!target) return null;
+  return rows.find((r) => normalizeSlug(r.author_name) === target)?.author_id ?? null;
 }
