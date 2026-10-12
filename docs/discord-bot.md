@@ -134,6 +134,16 @@ command flags for every setting.
 
 ### Account linking (for `/myplugins`)
 
+**Linking is per Discord user, not per-server, and open to every member —
+not just the server owner/admins.** `/link` and `/unlink` are regular
+(non-admin) commands anyone in the server can run on their own account; the
+admin-only commands (`/watch`, `/channel-stats`, `/commands`) are a
+separate, unrelated set of guild-wide settings. The link is keyed by the
+Discord user's own global account id, so it follows them into every server
+the bot is in — the server owner can link their own author identity same as
+any other member, and a server with ten plugin authors in it would end up
+with ten independent links, not one shared one.
+
 A Discord user can link **one RuneScape (mod.io) author identity and/or one
 RuneLite author identity** — independent per-game links, not a single
 combined identity, since the two catalogs have entirely separate author ids
