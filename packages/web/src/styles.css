@@ -300,6 +300,13 @@ body {
   gap: 6px;
 }
 
+.kofi-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
 .randomizer-btn:disabled {
   cursor: default;
   opacity: 0.8;
@@ -2327,6 +2334,25 @@ h1 {
 }
 
 .footer-discord:hover {
+  border-color: var(--gold);
+  color: var(--goldHi);
+}
+
+.footer-kofi {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 6px;
+  border: 1px solid var(--line2);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.footer-kofi:hover {
   border-color: var(--gold);
   color: var(--goldHi);
 }

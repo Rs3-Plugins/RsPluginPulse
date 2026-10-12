@@ -22,6 +22,9 @@ export function Footer() {
             <a href="https://discord.gg/gHN7c9B5FU" target="_blank" rel="noopener" className="footer-discord">
               Join our Discord ↗
             </a>
+            <a href="https://ko-fi.com/mark7625" target="_blank" rel="noopener" className="footer-kofi">
+              Buy me a coffee ↗
+            </a>
             <button className="footer-link" onClick={() => setLegalDoc("cookies")}>
               Cookie policy
             </button>
