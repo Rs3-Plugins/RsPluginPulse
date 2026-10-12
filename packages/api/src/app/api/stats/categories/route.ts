@@ -17,5 +17,5 @@ export async function GET(request: Request) {
   const result = await remember(`stats:categories:${game}:${page}:${pageSize}`, CACHE_CEILING.LEADERBOARD, freshness, () =>
     getCategoryStatsPage(game, page, pageSize),
   );
-  return jsonWithCors(result);
+  return jsonWithCors(result, { headers: { "Cache-Control": "public, max-age=300, stale-while-revalidate=1800" } });
 }

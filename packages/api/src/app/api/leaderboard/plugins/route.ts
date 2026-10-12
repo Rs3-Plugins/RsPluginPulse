@@ -16,5 +16,5 @@ export async function GET(request: Request) {
   const plugins = await remember(`leaderboard:plugins:${period}:${limit}:${game}`, CACHE_CEILING.LEADERBOARD, freshness, () =>
     getTopPlugins(period, limit, game),
   );
-  return jsonWithCors({ period, plugins });
+  return jsonWithCors({ period, plugins }, { headers: { "Cache-Control": "public, max-age=300, stale-while-revalidate=1800" } });
 }

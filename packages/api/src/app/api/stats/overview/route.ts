@@ -17,5 +17,5 @@ export async function GET(request: Request) {
   const overview = await remember(`stats:overview:${range}:${game}`, CACHE_CEILING.LEADERBOARD, freshness, () =>
     getStatsOverview(range, game),
   );
-  return jsonWithCors(overview);
+  return jsonWithCors(overview, { headers: { "Cache-Control": "public, max-age=300, stale-while-revalidate=1800" } });
 }

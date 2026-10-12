@@ -25,5 +25,5 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return jsonWithCors({ error: "plugin not found" }, { status: 404 });
   }
 
-  return jsonWithCors(result);
+  return jsonWithCors(result, { headers: { "Cache-Control": "public, max-age=120, stale-while-revalidate=600" } });
 }

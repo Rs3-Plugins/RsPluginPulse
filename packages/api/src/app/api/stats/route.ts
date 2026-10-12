@@ -11,5 +11,5 @@ export async function GET(request: Request) {
 
   const freshness = (await rememberBriefly(`freshness:${game}`, () => getLatestSnapshotTime(game))) ?? "none";
   const stats = await remember(`stats:${game}`, CACHE_CEILING.LEADERBOARD, freshness, () => getSiteStats(game));
-  return jsonWithCors(stats);
+  return jsonWithCors(stats, { headers: { "Cache-Control": "public, max-age=300, stale-while-revalidate=1800" } });
 }

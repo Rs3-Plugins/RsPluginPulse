@@ -10,11 +10,9 @@ export async function GET(request: Request) {
   const gameParam = searchParams.get("game");
   const game = gameParam ? parseGame(gameParam) : undefined;
 
-  // Filtering by game turns this into a join + seq scan across every
-  // snapshot row (no game column on plugin_snapshots itself) -- ~100-200ms
-  // on this dataset. Header.tsx calls this on every page/game switch, so
-  // it's worth the same short memoize the other routes' freshness probes
-  // use rather than paying that on every request.
+  // Reuses the same short memoize the other routes' freshness probes use
+  // (same cache key) -- Header.tsx calls this on every page/game switch,
+  // so even the now-fast indexed lookup is worth skipping on repeat hits.
   const updatedAt = await rememberBriefly(`freshness:${game ?? "global"}`, () => getLatestSnapshotTime(game));
-  return jsonWithCors({ updatedAt });
+  return jsonWithCors({ updatedAt }, { headers: { "Cache-Control": "public, max-age=30, stale-while-revalidate=120" } });
 }
