@@ -27,10 +27,17 @@ command flags for every setting.
   terser than the full card.
 - `/leaderboard <plugins|authors> [period]` — top N for a period (alltime /
   hot / weekly / monthly), mirrors the site's leaderboard tabs.
-- `/myplugins` — pulls up the stats for whichever author account the
-  Discord user has linked (see **Account linking** below) as an embed, so an
-  author can check their own numbers without leaving Discord.
-- `/link <author-id-or-slug>` — starts the account-linking flow.
+- `/myplugins [game]` — pulls up the stats for whichever author account the
+  Discord user has linked for that game (see **Account linking** below) as
+  an embed, so an author can check their own numbers without leaving
+  Discord. Omitting `game` with only one game linked just uses that one; if
+  both are linked and `game` is omitted, show both (e.g. two embeds, or one
+  embed with a RuneScape section and a RuneLite section).
+- `/link <game> <author-id-or-slug>` — starts the account-linking flow for
+  that game. A Discord user can link a RuneScape (mod.io) identity, a
+  RuneLite identity, or both — they're entirely separate catalogs with
+  separate author ids, so one link doesn't imply the other.
+- `/unlink <game>` — removes that game's link.
 - Admin-only, scoped to users with `Manage Server`:
   - `/watch add <plugin|author> <name> [threshold]` — start alerting this
     channel on big moves for that entity.
@@ -39,6 +46,9 @@ command flags for every setting.
   - `/channel-stats set <channel> <template>` — see **Channel description
     templates**.
   - `/channel-stats remove <channel>`
+  - `/commands disable <command>` / `/commands enable <command>` — turn
+    individual slash commands off for this server (see **Per-server command
+    toggles**).
   - Anything genuinely visual (embed design, picking which fields show)
     should push the admin to the dashboard rather than trying to build a
     form out of slash command options — Discord's command UI doesn't do
@@ -90,6 +100,22 @@ command flags for every setting.
   embed image/thumbnail option before building a from-scratch image
   generator for this.
 
+### Per-server command toggles
+
+- Admins can turn individual slash commands off for their server (e.g. a
+  server that only wants the read-only lookup commands and doesn't want
+  `/myplugins` or notifications cluttering things up).
+- Two places to control it, same underlying per-guild setting: the
+  `/commands enable|disable` admin command, and a checklist in the
+  dashboard's per-server settings page.
+- Needs to reject (or hide via Discord's own per-guild command permissions
+  API, if available for the command type) a disabled command at the
+  interaction level, not just hide it from being registered — simplest
+  correct approach is registering all commands globally as normal and
+  having the bot check the per-guild toggle table first thing in the
+  interaction handler, replying with an ephemeral "this command is
+  disabled on this server" if it's off.
+
 ### Dashboard flow
 
 1. **"Add to Discord"** — standard Discord OAuth2 bot-install flow
@@ -102,23 +128,30 @@ command flags for every setting.
    `Manage Server` there.
 3. **Server picker** — after login, list those servers, click into one.
 4. **Per-server settings page** — watchlist (add/remove/thresholds),
-   channel-description bindings, the embed designer, and an overview of
-   which Discord users have linked an author account in this server (admin
-   visibility, not edit).
+   channel-description bindings, the embed designer, the command toggle
+   checklist, and an overview of which Discord users have linked an author
+   account (per game) in this server (admin visibility, not edit).
 
 ### Account linking (for `/myplugins`)
 
-Needs a concrete decision before building: how does a Discord user prove
-they own a given mod.io/RuneLite author identity?
+A Discord user can link **one RuneScape (mod.io) author identity and/or one
+RuneLite author identity** — independent per-game links, not a single
+combined identity, since the two catalogs have entirely separate author ids
+and someone could easily publish under one platform but not the other (or
+under different names on each).
 
-- **Low-friction option:** `/link <author-id-or-slug>` just takes it on
-  trust — since this only grants *read* access to already-public stats
+Needs a concrete decision before building: how does a Discord user prove
+they own a given author identity?
+
+- **Low-friction option:** `/link <game> <author-id-or-slug>` just takes it
+  on trust — since this only grants *read* access to already-public stats
   (nothing an unlinked person couldn't already see via `/author`), the
   actual risk of a false claim is low. Simplest to ship first.
 - **Verified option:** generate a one-time code the user has to place
   somewhere provably theirs (mod.io profile bio, a specific RuneLite plugin
   hub manifest field) before `/link` accepts it. More trustworthy, more
-  friction, more to build.
+  friction, more to build, and would need its own verification step per
+  game (mod.io and RuneLite have no shared identity to piggyback on).
 - Could ship the low-friction version first and revisit if it's ever
   actually abused.
 
@@ -139,9 +172,11 @@ Fits the existing monorepo's pattern of one package per concern
   (cookies + a sessions table, or a signed-JWT approach) that the current
   purely-public, no-auth API doesn't have at all yet.
 - **`packages/db` additions** — new tables: guild settings, per-guild
-  watchlist entries, channel-template bindings, embed configs, and
-  Discord-user-to-author links. All net-new; nothing about the existing
-  schema needs to change for this.
+  watchlist entries, channel-template bindings, embed configs, per-guild
+  command toggles, and Discord-user-to-author links (one row per
+  Discord user *per game*, so a user can have a RuneScape row, a RuneLite
+  row, or both). All net-new; nothing about the existing schema needs to
+  change for this.
 - **Reuses as-is:** every existing public API endpoint
   (`/api/plugins/{id}`, `/api/authors/{id}`, `/api/card/...`,
   `/api/badge/...`, `/api/resolve/...`, `/api/leaderboard/...`,
@@ -173,9 +208,11 @@ Fits the existing monorepo's pattern of one package per concern
    Discord API integration against the existing public API with the least
    new infrastructure (no auth, no new DB tables beyond maybe nothing at
    all).
-2. **Notifications + channel templates:** needs the new DB tables and the
-   hourly tick worker, still no dashboard (configure via slash commands
-   only).
+2. **Notifications + channel templates + command toggles:** needs the new
+   DB tables and the hourly tick worker, still no dashboard (configure via
+   slash commands only).
 3. **Dashboard:** OAuth login, server picker, visual settings for
    everything phase 2 added via slash commands, plus the embed designer.
-4. **Account linking + `/myplugins`:** lowest-friction version first.
+4. **Account linking + `/myplugins`:** lowest-friction version first, one
+   game at a time is fine for an initial cut (RuneScape or RuneLite,
+   whichever the server leans toward) if both-at-once adds real complexity.
