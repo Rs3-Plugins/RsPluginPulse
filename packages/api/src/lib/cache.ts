@@ -2,12 +2,21 @@
 // badges, search's trending view). This process serves everything from one
 // instance behind one nginx (see deploy/README.md) -- no multi-instance
 // deploy, so there's nothing a shared cache like Redis would buy here that
-// a plain Map doesn't. Entries just expire on a TTL tied to how often
-// ingest actually refreshes the data (hourly) rather than being invalidated
-// by ingest directly -- ingest runs as a separate CLI process/cron timer,
-// not inside this server, so there's no in-process signal to invalidate on.
+// a plain Map doesn't.
+//
+// Entries are validated against `freshnessKey` (the caller passes in
+// something like the latest snapshot timestamp for the relevant game) --
+// NOT a short blind TTL. Ingest runs as a separate CLI process/cron timer
+// (hourly, see deploy/configure.sh), not inside this server, so there's no
+// in-process signal to invalidate *on*; but the data an entry depends on
+// only actually changes once that freshness key changes, so a flat 5-10min
+// TTL was just recomputing the exact same result 6-12 times an hour for no
+// reason. `ceilingTtlMs` is only a safety bound (ingest running very late,
+// or the freshness probe itself failing) -- it should be well over the
+// ingest interval, not under it.
 interface Entry {
   value: unknown;
+  freshnessKey: string;
   expiresAt: number;
 }
 
@@ -27,37 +36,55 @@ function sweepExpired(now: number) {
   }
 }
 
-// Classic cache-aside: return the cached value if it's still fresh,
-// otherwise compute, store, and return it. Concurrent callers for the same
-// cold key will each compute independently (acceptable at this scale --
-// the point is cutting repeat load across *requests over time*, not
-// de-duplicating a thundering herd within the same millisecond).
-export async function remember<T>(key: string, ttlMs: number, compute: () => Promise<T>): Promise<T> {
+// Cache-aside, validated by freshnessKey rather than time alone: a cached
+// entry is only reused if the key matches what it was stored with (the
+// data hasn't moved) *and* it's under the ceiling TTL. Concurrent callers
+// for the same cold key each compute independently (acceptable at this
+// scale -- the point is cutting repeat load across *requests over time*,
+// not de-duplicating a thundering herd within the same millisecond).
+export async function remember<T>(key: string, ceilingTtlMs: number, freshnessKey: string, compute: () => Promise<T>): Promise<T> {
   const now = Date.now();
   sweepExpired(now);
 
   const existing = store.get(key);
-  if (existing && existing.expiresAt > now) return existing.value as T;
+  if (existing && existing.expiresAt > now && existing.freshnessKey === freshnessKey) {
+    return existing.value as T;
+  }
 
   const value = await compute();
-  store.set(key, { value, expiresAt: now + ttlMs });
+  store.set(key, { value, freshnessKey, expiresAt: now + ceilingTtlMs });
   return value;
 }
 
-export const CACHE_TTL = {
-  // Leaderboard/stats: expensive aggregation queries, and the data itself
-  // only moves when ingest runs (hourly) -- see deploy/configure.sh.
-  LEADERBOARD: 10 * 60_000,
-  // Badges are hit repeatedly by shields.io for the exact same id+metric
-  // every time a page embedding one loads -- shorter TTL since a badge is
-  // meant to look "live", but still collapses a lot of repeat traffic.
-  BADGE: 5 * 60_000,
-  // Per-entity pages (a specific plugin/author) -- shorter than the
-  // leaderboard since any one of thousands of ids is less likely to be
-  // requested again soon, so there's less to gain from a long TTL.
-  ENTITY: 5 * 60_000,
-  // The empty-query "trending" view is the one search response every
-  // visitor's first keystroke-less open hits -- everything else is too
-  // high-cardinality (arbitrary query text) to be worth caching.
-  SEARCH_TRENDING: 10 * 60_000,
+// Safety ceilings only -- comfortably longer than the hourly ingest
+// interval so a late or skipped ingest run doesn't matter, but still short
+// enough that a stuck freshness probe can't pin stale data forever.
+export const CACHE_CEILING = {
+  LEADERBOARD: 3 * 60 * 60_000,
+  BADGE: 3 * 60 * 60_000,
+  ENTITY: 3 * 60 * 60_000,
+  SEARCH_TRENDING: 3 * 60 * 60_000,
 } as const;
+
+// A short, flat-TTL memoizer for the freshness *probe* itself (currently
+// "latest ingested snapshot time", used both as /api/status's own answer
+// and as the freshnessKey every other cached route above validates
+// against). This is NOT the same as `remember` -- there's no freshness key
+// to validate against here, since this signal IS the freshness key. It
+// exists because the probe query turned out to not be cheap once filtered
+// by game (a join + seq scan across every snapshot row, ~100-200ms on
+// this dataset, since plugin_snapshots has no game column of its own) --
+// paying that on literally every request, including cache hits, defeated
+// the point. A 30s staleness window on "how recent is the data" is
+// unnoticeable; ingest only moves this number once an hour.
+const freshnessProbes = new Map<string, { value: unknown; expiresAt: number }>();
+const FRESHNESS_PROBE_TTL_MS = 30_000;
+
+export async function rememberBriefly<T>(key: string, compute: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const existing = freshnessProbes.get(key);
+  if (existing && existing.expiresAt > now) return existing.value as T;
+  const value = await compute();
+  freshnessProbes.set(key, { value, expiresAt: now + FRESHNESS_PROBE_TTL_MS });
+  return value;
+}

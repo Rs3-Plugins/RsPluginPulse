@@ -1,5 +1,5 @@
-import { getAuthorProfile, getPlugin, getPluginRanks, getPluginTrend, type PluginTrendPoint } from "@rspluginpulse/db";
-import { CACHE_TTL, remember } from "@/lib/cache";
+import { getAuthorProfile, getLatestSnapshotTime, getPlugin, getPluginRanks, getPluginTrend, type PluginTrendPoint } from "@rspluginpulse/db";
+import { CACHE_CEILING, remember, rememberBriefly } from "@/lib/cache";
 import { jsonWithCors, OPTIONS as corsOptions } from "@/lib/cors";
 
 export const OPTIONS = corsOptions;
@@ -75,7 +75,14 @@ export async function GET(_request: Request, { params }: { params: Promise<{ typ
     return jsonWithCors({ error: { status: 400, message: "key must be a plugin or author id" } }, { status: 400 });
   }
 
-  const resolved = await remember(`badge:${type}:${id}:${metric}`, CACHE_TTL.BADGE, () => resolveBadgeValue(type, id, metric));
+  // The id's game isn't known until it's looked up inside resolveBadgeValue,
+  // so this uses the global (cross-game) freshness signal rather than
+  // paying for that lookup just to pick a cache key -- harmless, since an
+  // ingest for either game still only runs hourly either way.
+  const freshness = (await rememberBriefly("freshness:global", () => getLatestSnapshotTime())) ?? "none";
+  const resolved = await remember(`badge:${type}:${id}:${metric}`, CACHE_CEILING.BADGE, freshness, () =>
+    resolveBadgeValue(type, id, metric),
+  );
   if (!resolved.found) {
     return jsonWithCors({ error: { status: 404, message: `No ${type} with id ${id}` } }, { status: 404 });
   }
