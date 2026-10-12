@@ -4,6 +4,7 @@ import { getTopPlugins, type PluginLeaderboardRow } from "../api";
 import { useGame } from "../context/GameContext";
 import { slugifyTag } from "../lib/slug";
 import { authorHref, pluginHref } from "../lib/links";
+import { usePageMeta } from "../hooks/usePageMeta";
 
 export function TagPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -32,6 +33,14 @@ export function TagPage() {
     if (!plugins || !tagName) return [];
     return plugins.filter((p) => p.tags.includes(tagName)).sort((a, b) => b.value - a.value);
   }, [plugins, tagName]);
+
+  usePageMeta({
+    title: tagName ? `${tagName} plugins — RuneScape PluginPulse` : "RuneScape PluginPulse",
+    description: tagName
+      ? `${matches.length} plugin${matches.length === 1 ? "" : "s"} tagged "${tagName}" on RuneScape PluginPulse.`
+      : "Browse RuneScape and RuneLite plugins by tag.",
+    canonicalPath: game === "runescape" ? `/tags/${slug ?? ""}` : `/tags/${slug ?? ""}?game=${game}`,
+  });
 
   if (error) {
     return (

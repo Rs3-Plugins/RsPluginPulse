@@ -6,6 +6,7 @@ import { Dropdown } from "../components/Dropdown";
 import { PluginAuthorPicker, type PickerItem } from "../components/PluginAuthorPicker";
 import { useGame } from "../context/GameContext";
 import { authorHref, pluginHref } from "../lib/links";
+import { usePageMeta } from "../hooks/usePageMeta";
 
 type ParamType = "enum" | "int" | "string";
 type Tab = "body" | "headers" | "curl" | "fetch";
@@ -423,6 +424,12 @@ const TOKEN_CLASS_NAME: Record<TokenClass, string> = {
 export function ApiExplorer() {
   const { game } = useGame();
   const [searchParams] = useSearchParams();
+
+  usePageMeta({
+    title: "API — RuneScape PluginPulse",
+    description: "A free, public JSON API for RuneScape and RuneLite plugin download/install stats, leaderboards and author data, plus a Badge and Embed Card builder.",
+    canonicalPath: game === "runescape" ? "/api" : `/api?game=${game}`,
+  });
   const [devTab, setDevTab] = useState<DevTab>(() => initialDevTab(searchParams));
   const [activeKey, setActiveKey] = useState(ENDPOINTS[0].key);
   const [paramsByEndpoint, setParamsByEndpoint] = useState<Record<string, Record<string, string>>>({});

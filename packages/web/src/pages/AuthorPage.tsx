@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { getAuthorProfile, getPluginTrend, type AuthorProfile } from "../api";
+import { API_BASE, getAuthorProfile, getPluginTrend, type AuthorProfile } from "../api";
 import { useGame, type Game } from "../context/GameContext";
-import { pluginHref } from "../lib/links";
+import { authorHref, pluginHref } from "../lib/links";
+import { slugifyTag as slugify } from "../lib/slug";
+import { usePageMeta } from "../hooks/usePageMeta";
 
 type SortKey = "downloads" | "week" | "subs" | "newest";
 
@@ -55,6 +57,29 @@ export function AuthorPage() {
       .catch((err) => setError(String(err)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, setGame]);
+
+  usePageMeta({
+    title: author ? `${author.authorName} — RuneScape PluginPulse` : "RuneScape PluginPulse",
+    description: author
+      ? `${author.pluginCount} plugin${author.pluginCount === 1 ? "" : "s"} · ${author.totals.downloadsTotal.toLocaleString()} total ${
+          author.game === "runelite" ? "installs" : "downloads"
+        } on RuneScape PluginPulse.`
+      : "Author plugin stats on RuneScape PluginPulse.",
+    canonicalPath: author ? authorHref(slugify(author.authorName), author.game as "runescape" | "osrs" | "runelite") : `/author/${id ?? ""}`,
+    image: author ? `${API_BASE}/api/card/author/${author.authorId}.png` : undefined,
+    jsonLd: author
+      ? {
+          "@context": "https://schema.org",
+          "@type": "ProfilePage",
+          mainEntity: {
+            "@type": "Person",
+            name: author.authorName,
+            image: author.authorAvatarUrl || undefined,
+            url: `https://rspluginpulse.com${authorHref(slugify(author.authorName), author.game as "runescape" | "osrs" | "runelite")}`,
+          },
+        }
+      : undefined,
+  });
 
   useEffect(() => {
     if (!author) return;

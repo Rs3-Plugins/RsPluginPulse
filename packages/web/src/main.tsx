@@ -12,6 +12,7 @@ import { AuthorPage } from "./pages/AuthorPage";
 import { ApiExplorer } from "./pages/ApiExplorer";
 import { TagPage } from "./pages/TagPage";
 import { SiteStats } from "./pages/SiteStats";
+import { NotFound } from "./pages/NotFound";
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -30,6 +31,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/tags/:slug" element={<TagPage />} />
               <Route path="/stats" element={<SiteStats />} />
               <Route path="/compare" element={<SiteStats />} />
+              <Route path="*" element={<NotFound />} />
             </Routes>
           </main>
           <Footer />

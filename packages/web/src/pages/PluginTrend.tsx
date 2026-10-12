@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { getPluginTrend, getTopPlugins, type PluginLeaderboardRow, type PluginMeta, type PluginTrendPoint } from "../api";
+import { API_BASE, getPluginTrend, getTopPlugins, type PluginLeaderboardRow, type PluginMeta, type PluginTrendPoint } from "../api";
 import { TrendChart, trendMetrics, type ChartType, type TrendMetric } from "../components/TrendChart";
 import { useGame } from "../context/GameContext";
 import { AvatarImg } from "../components/AvatarImg";
 import { slugifyTag } from "../lib/slug";
 import { authorHref, pluginHref } from "../lib/links";
+import { usePageMeta } from "../hooks/usePageMeta";
 
 type RangePreset = "7d" | "30d" | "90d" | "all" | "custom";
 
@@ -106,6 +107,36 @@ export function PluginTrend() {
       .catch((err) => setError(String(err)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, setGame]);
+
+  const latestPoint = points && points.length > 0 ? points[points.length - 1] : null;
+  usePageMeta({
+    title: plugin ? `${plugin.name} by ${plugin.authorName} — RuneScape PluginPulse` : "RuneScape PluginPulse",
+    description: plugin
+      ? `${plugin.summary || "Download trends and stats"}${
+          latestPoint ? ` — ${latestPoint.downloadsTotal.toLocaleString()} ${plugin.game === "runelite" ? "installs" : "downloads"}.` : "."
+        }`
+      : "Plugin download trends and stats on RuneScape PluginPulse.",
+    canonicalPath: plugin ? (plugin.game === "runescape" ? `/plugin/${plugin.nameId}` : `/plugin/${plugin.nameId}?game=${plugin.game}`) : `/plugin/${id ?? ""}`,
+    image: plugin ? `${API_BASE}/api/card/plugin/${plugin.id}.png` : undefined,
+    jsonLd:
+      plugin && latestPoint
+        ? {
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            name: plugin.name,
+            author: { "@type": "Person", name: plugin.authorName },
+            applicationCategory: "GameApplication",
+            operatingSystem: plugin.game === "runelite" ? "RuneLite" : "RuneScape",
+            description: plugin.summary || undefined,
+            url: `https://rspluginpulse.com${pluginHref(plugin.nameId, plugin.game as "runescape" | "osrs" | "runelite")}`,
+            interactionStatistic: {
+              "@type": "InteractionCounter",
+              interactionType: "https://schema.org/InstallAction",
+              userInteractionCount: latestPoint.downloadsTotal,
+            },
+          }
+        : undefined,
+  });
 
   const allTimeRank = useMemo(() => {
     if (!allPlugins || !plugin) return null;

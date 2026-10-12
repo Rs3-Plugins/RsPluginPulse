@@ -22,6 +22,7 @@ import { DailyChart, formatTooltipDate } from "../components/DailyChart";
 import { Pagination } from "../components/Pagination";
 import { useGame, type Game } from "../context/GameContext";
 import { authorHref, pluginHref } from "../lib/links";
+import { usePageMeta } from "../hooks/usePageMeta";
 
 type StatsTab = "overview" | "compare";
 
@@ -87,6 +88,17 @@ export function SiteStats() {
     else params.set("tab", next);
     setSearchParams(params, { replace: true });
   }
+
+  const isComparePath = location.pathname.startsWith("/compare");
+  usePageMeta({
+    title: isComparePath
+      ? "Compare plugins & authors — RuneScape PluginPulse"
+      : "Site stats — RuneScape PluginPulse",
+    description: isComparePath
+      ? "Put up to four RuneScape or RuneLite plugins or authors side by side and compare their download trends."
+      : "Download totals, fastest-growing plugins and newest releases across the RuneScape and RuneLite catalog.",
+    canonicalPath: game === "runescape" ? (isComparePath ? "/compare" : "/stats") : `${isComparePath ? "/compare" : "/stats"}?game=${game}`,
+  });
 
   const cmpType: CompareType = searchParams.get("type") === "author" ? "author" : "plugin";
   const cmpMetric: CompareMetric = (["total", "daily", "subs"] as const).includes(searchParams.get("metric") as CompareMetric)
