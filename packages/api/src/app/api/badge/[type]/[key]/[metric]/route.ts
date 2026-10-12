@@ -1,4 +1,5 @@
-import { getAuthorProfile, getPlugin, getPluginTrend, getTopPlugins, type PluginTrendPoint } from "@rspluginpulse/db";
+import { getAuthorProfile, getLatestSnapshotTime, getPlugin, getPluginRanks, getPluginTrend, type PluginTrendPoint } from "@rspluginpulse/db";
+import { CACHE_CEILING, remember, rememberBriefly } from "@/lib/cache";
 import { jsonWithCors, OPTIONS as corsOptions } from "@/lib/cors";
 
 export const OPTIONS = corsOptions;
@@ -74,19 +75,42 @@ export async function GET(_request: Request, { params }: { params: Promise<{ typ
     return jsonWithCors({ error: { status: 400, message: "key must be a plugin or author id" } }, { status: 400 });
   }
 
-  let value: number | null = null;
-  let game = "rs3";
+  // The id's game isn't known until it's looked up inside resolveBadgeValue,
+  // so this uses the global (cross-game) freshness signal rather than
+  // paying for that lookup just to pick a cache key -- harmless, since an
+  // ingest for either game still only runs hourly either way.
+  const freshness = (await rememberBriefly("freshness:global", () => getLatestSnapshotTime())) ?? "none";
+  const resolved = await remember(`badge:${type}:${id}:${metric}`, CACHE_CEILING.BADGE, freshness, () =>
+    resolveBadgeValue(type, id, metric),
+  );
+  if (!resolved.found) {
+    return jsonWithCors({ error: { status: 404, message: `No ${type} with id ${id}` } }, { status: 404 });
+  }
 
+  return jsonWithCors(
+    {
+      schemaVersion: 1,
+      label: labelFor(metric, resolved.game),
+      message: badgeMessage(metric, resolved.value),
+      color: "caa44d",
+      cacheSeconds: 300,
+    },
+    { headers: { "Cache-Control": "public, max-age=300" } },
+  );
+}
+
+type BadgeValue = { found: true; value: number | null; game: string } | { found: false };
+
+async function resolveBadgeValue(type: "plugin" | "author", id: number, metric: string): Promise<BadgeValue> {
   if (type === "plugin") {
     const plugin = await getPlugin(id);
-    if (!plugin) return jsonWithCors({ error: { status: 404, message: `No plugin with id ${id}` } }, { status: 404 });
-    game = plugin.game;
+    if (!plugin) return { found: false };
 
     const m = metric as PluginMetric;
+    let value: number | null = null;
     if (m === "rank") {
-      const top = await getTopPlugins("alltime", 100000, plugin.game);
-      const idx = top.findIndex((p) => p.id === id);
-      value = idx === -1 ? null : idx + 1;
+      const ranks = await getPluginRanks([id], "alltime", plugin.game);
+      value = ranks.get(id) ?? null;
     } else {
       const trend = await getPluginTrend(id);
       const last = trend[trend.length - 1];
@@ -96,21 +120,18 @@ export async function GET(_request: Request, { params }: { params: Promise<{ typ
       else if (m === "month") value = last.downloadsTotal - findPointNearDays(trend, 30).downloadsTotal;
       else if (m === "subscribers") value = last.subscribersTotal;
     }
-  } else {
-    const author = await getAuthorProfile(id);
-    if (!author) return jsonWithCors({ error: { status: 404, message: `No author with id ${id}` } }, { status: 404 });
-    game = author.game;
-
-    const m = metric as AuthorMetric;
-    if (m === "downloads") value = author.totals.downloadsTotal;
-    else if (m === "today") value = author.totals.downloadsToday;
-    else if (m === "week") value = author.totals.weeklyGain;
-    else if (m === "plugins") value = author.pluginCount;
-    else if (m === "rank") value = author.ranks.allTime;
+    return { found: true, value, game: plugin.game };
   }
 
-  return jsonWithCors(
-    { schemaVersion: 1, label: labelFor(metric, game), message: badgeMessage(metric, value), color: "caa44d", cacheSeconds: 300 },
-    { headers: { "Cache-Control": "public, max-age=300" } },
-  );
+  const author = await getAuthorProfile(id);
+  if (!author) return { found: false };
+
+  const m = metric as AuthorMetric;
+  let value: number | null = null;
+  if (m === "downloads") value = author.totals.downloadsTotal;
+  else if (m === "today") value = author.totals.downloadsToday;
+  else if (m === "week") value = author.totals.weeklyGain;
+  else if (m === "plugins") value = author.pluginCount;
+  else if (m === "rank") value = author.ranks.allTime;
+  return { found: true, value, game: author.game };
 }

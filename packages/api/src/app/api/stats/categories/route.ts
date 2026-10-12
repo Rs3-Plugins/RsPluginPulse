@@ -1,4 +1,5 @@
-import { getCategoryStatsPage } from "@rspluginpulse/db";
+import { getCategoryStatsPage, getLatestSnapshotTime } from "@rspluginpulse/db";
+import { CACHE_CEILING, remember, rememberBriefly } from "@/lib/cache";
 import { jsonWithCors, OPTIONS as corsOptions } from "@/lib/cors";
 import { parseGame } from "@/lib/game";
 
@@ -12,6 +13,9 @@ export async function GET(request: Request) {
   const page = Math.max(1, Math.trunc(Number(searchParams.get("page")) || 1));
   const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(Number(searchParams.get("pageSize")) || 10)));
 
-  const result = await getCategoryStatsPage(game, page, pageSize);
+  const freshness = (await rememberBriefly(`freshness:${game}`, () => getLatestSnapshotTime(game))) ?? "none";
+  const result = await remember(`stats:categories:${game}:${page}:${pageSize}`, CACHE_CEILING.LEADERBOARD, freshness, () =>
+    getCategoryStatsPage(game, page, pageSize),
+  );
   return jsonWithCors(result);
 }
