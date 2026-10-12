@@ -261,9 +261,15 @@ export async function renderCardSvg(type: EmbedCardType, entityId: number, optio
     <clipPath id="cardShape">
       <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="10" />
     </clipPath>
+    <linearGradient id="goldFade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="${pal.gold}" stop-opacity="0" />
+      <stop offset="12%" stop-color="${pal.gold}" stop-opacity="1" />
+      <stop offset="88%" stop-color="${pal.gold}" stop-opacity="1" />
+      <stop offset="100%" stop-color="${pal.gold}" stop-opacity="0" />
+    </linearGradient>
   </defs>
   <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="10" fill="${pal.bg}" stroke="${pal.border}" />
-  <rect x="2" y="1" width="${width - 4}" height="2" fill="${pal.gold}" clip-path="url(#cardShape)" />
+  <rect x="0" y="0" width="${width}" height="4" fill="url(#goldFade)" clip-path="url(#cardShape)" />
   ${icon}
   <text x="${nameX}" y="32" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="16" font-weight="700" fill="${pal.text}">${escapeXml(name)}</text>
   ${subtitleText}
