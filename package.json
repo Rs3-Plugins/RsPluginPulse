@@ -1,0 +1,25 @@
+{
+  "name": "rspluginpulse",
+  "private": true,
+  "homepage": "https://rspluginpulse.com",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "migrate": "npm run migrate -w @rspluginpulse/db",
+    "ingest": "npm run ingest -w @rspluginpulse/ingest",
+    "ingest:runelite": "npm run ingest:runelite -w @rspluginpulse/ingest",
+    "dev:api": "npm run dev -w @rspluginpulse/api",
+    "dev:web": "npm run dev -w @rspluginpulse/web",
+    "build:api": "npm run build -w @rspluginpulse/api",
+    "build:web": "npm run build -w @rspluginpulse/web"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "allowScripts": {
+    "@embedded-postgres/windows-x64@18.4.0-beta.17": true,
+    "esbuild@0.28.2": true,
+    "esbuild@0.25.12": true
+  }
+}

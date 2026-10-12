@@ -1,0 +1,20 @@
+{
+  "name": "@rspluginpulse/db",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "migrate": "tsx src/migrate.ts",
+    "dev:postgres": "tsx src/local-postgres.ts"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "embedded-postgres": "18.4.0-beta.17",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

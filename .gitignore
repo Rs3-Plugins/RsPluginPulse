@@ -1,0 +1,8 @@
+node_modules/
+packages/db/.pgdata/
+.env
+.next/
+dist/
+packages/web/dist/
+*.log
+packages/api/.cache/

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>RuneScape PluginPulse — RS3 plugin download trends & leaderboards</title>
+    <meta name="description" content="Track install, download and subscriber trends for RuneScape 3 plugins on mod.io. Leaderboards, per-plugin charts and author rankings." />
+    <link rel="canonical" href="https://rspluginpulse.com/" />
+    <meta name="theme-color" content="#0d0d0d" />
+    <meta name="color-scheme" content="dark light" />
+
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="RuneScape PluginPulse" />
+    <meta property="og:title" content="RuneScape PluginPulse" />
+    <meta property="og:description" content="Download trends, leaderboards and top authors for RS3 plugins on mod.io." />
+    <meta property="og:url" content="https://rspluginpulse.com/" />
+    <meta property="og:image" content="https://rspluginpulse.com/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="PluginPulse logo with the tagline: RS3 plugin download trends and leaderboards" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="RuneScape PluginPulse" />
+    <meta name="twitter:description" content="Download trends, leaderboards and top authors for RS3 plugins on mod.io." />
+    <meta name="twitter:image" content="https://rspluginpulse.com/twitter-card.png" />
+    <meta name="twitter:image:alt" content="PluginPulse logo with the tagline: RS3 plugin download trends and leaderboards" />
+
+    <script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"WebSite","name":"RuneScape PluginPulse","alternateName":"PluginPulse","url":"https://rspluginpulse.com/","description":"Download trends, leaderboards and top authors for RS3 plugins on mod.io."}
+    </script>
+  </head>
+  <body>
+    <script>
+      document.documentElement.setAttribute("data-theme", localStorage.getItem("theme") === "light" ? "light" : "dark");
+      document.documentElement.setAttribute("data-game", localStorage.getItem("game") === "osrs" ? "osrs" : "rs3");
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

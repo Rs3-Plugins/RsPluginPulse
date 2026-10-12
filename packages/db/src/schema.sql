@@ -1,0 +1,147 @@
+-- RuneScape PluginPulse schema.
+-- Keyed by mod.io's mod id, which is stable and never reassigned.
+-- Author info (name, profile url, avatar) is denormalized onto plugins
+-- rather than a separate authors table, since mod.io has no stable
+-- per-author endpoint here -- author pages are built by aggregating
+-- across the plugins rows that share an author_id.
+
+CREATE TABLE IF NOT EXISTS plugins (
+  id INTEGER PRIMARY KEY,
+  name_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  author_id INTEGER NOT NULL,
+  author_name TEXT NOT NULL,
+  author_profile_url TEXT NOT NULL DEFAULT '',
+  author_avatar_url TEXT,
+  profile_url TEXT NOT NULL,
+  tags TEXT[] NOT NULL DEFAULT '{}',
+  logo_url TEXT,
+  summary TEXT NOT NULL DEFAULT '',
+  ratings_total INTEGER NOT NULL DEFAULT 0,
+  ratings_positive INTEGER NOT NULL DEFAULT 0,
+  ratings_negative INTEGER NOT NULL DEFAULT 0,
+  ratings_percentage_positive INTEGER NOT NULL DEFAULT 0,
+  ratings_display_text TEXT NOT NULL DEFAULT '',
+  date_added TIMESTAMPTZ NOT NULL,
+  date_updated TIMESTAMPTZ NOT NULL
+);
+
+ALTER TABLE plugins ADD COLUMN IF NOT EXISTS author_profile_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE plugins ADD COLUMN IF NOT EXISTS author_avatar_url TEXT;
+ALTER TABLE plugins ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE plugins ADD COLUMN IF NOT EXISTS logo_url TEXT;
+ALTER TABLE plugins ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT '';
+ALTER TABLE plugins ADD COLUMN IF NOT EXISTS ratings_total INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE plugins ADD COLUMN IF NOT EXISTS ratings_positive INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE plugins ADD COLUMN IF NOT EXISTS ratings_negative INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE plugins ADD COLUMN IF NOT EXISTS ratings_percentage_positive INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE plugins ADD COLUMN IF NOT EXISTS ratings_display_text TEXT NOT NULL DEFAULT '';
+
+-- Multi-game support. 'rs3' (mod.io) is the original/default scope; new
+-- games (e.g. 'runelite') live in the same tables so the API and site
+-- logic stay identical and only filter by this column. mod.io's plugin
+-- and author ids are real upstream integers; non-mod.io games mint their
+-- own surrogate integer ids (see external_id_map below) so every existing
+-- `Number(id)`-based route/page keeps working unmodified.
+ALTER TABLE plugins ADD COLUMN IF NOT EXISTS game TEXT NOT NULL DEFAULT 'rs3';
+CREATE INDEX IF NOT EXISTS plugins_game_idx ON plugins (game);
+
+-- Stable integer ids for entities that don't have a native numeric id
+-- upstream (e.g. RuneLite plugins keyed by internalName, authors keyed by
+-- GitHub login). Minted once per (game, kind, external_key) and reused on
+-- every later ingest run so history keeps lining up against the same id.
+CREATE SEQUENCE IF NOT EXISTS external_id_seq START WITH 900000000 INCREMENT BY 1;
+
+CREATE TABLE IF NOT EXISTS external_id_map (
+  game TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  external_key TEXT NOT NULL,
+  id INTEGER NOT NULL,
+  PRIMARY KEY (game, kind, external_key)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS external_id_map_id_idx ON external_id_map (kind, id);
+
+-- Full contributor roster per plugin (mod.io always has exactly one row
+-- here; RuneLite's plugin-hub manifest sometimes credits several people in
+-- one free-text field, each of which gets their own row -- and their own
+-- author id -- so they each get a real, individual author page rather
+-- than being squashed into a single denormalized `plugins.author_*` row).
+-- `plugins.author_id`/`author_name`/etc. stay as the first (primary)
+-- entry here, purely so every existing primary-author-only query keeps
+-- working unchanged.
+CREATE TABLE IF NOT EXISTS plugin_authors (
+  plugin_id INTEGER NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+  author_id INTEGER NOT NULL,
+  author_name TEXT NOT NULL,
+  author_avatar_url TEXT,
+  author_profile_url TEXT,
+  position INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (plugin_id, author_id)
+);
+
+CREATE INDEX IF NOT EXISTS plugin_authors_author_idx ON plugin_authors (author_id);
+
+-- One row per plugin per ingest run. captured_at is shared across every
+-- plugin in a single run so windowed queries compare like-for-like.
+CREATE TABLE IF NOT EXISTS plugin_snapshots (
+  plugin_id INTEGER NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+  captured_at TIMESTAMPTZ NOT NULL,
+  downloads_total INTEGER NOT NULL,
+  downloads_today INTEGER NOT NULL,
+  subscribers_total INTEGER NOT NULL,
+  popularity_rank_position INTEGER,
+  PRIMARY KEY (plugin_id, captured_at)
+);
+
+CREATE INDEX IF NOT EXISTS plugin_snapshots_captured_at_idx
+  ON plugin_snapshots (captured_at);
+
+CREATE INDEX IF NOT EXISTS plugin_snapshots_plugin_captured_idx
+  ON plugin_snapshots (plugin_id, captured_at DESC);
+
+-- Short links for the embeddable stats card (/api/card/{id}.svg), so an
+-- embed URL carries an id instead of a theme/spark/etc query string.
+-- Settings are looked up by id; identical combos reuse the same row
+-- instead of minting a new short id every time.
+CREATE TABLE IF NOT EXISTS embed_cards (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  entity_id INTEGER NOT NULL,
+  theme TEXT NOT NULL DEFAULT 'dark',
+  spark BOOLEAN NOT NULL DEFAULT true,
+  spark_days INTEGER NOT NULL DEFAULT 30,
+  show_subtitle BOOLEAN NOT NULL DEFAULT true,
+  show_hot BOOLEAN NOT NULL DEFAULT true,
+  show_stat_downloads BOOLEAN NOT NULL DEFAULT true,
+  show_stat_week BOOLEAN NOT NULL DEFAULT true,
+  show_stat_third BOOLEAN NOT NULL DEFAULT true,
+  show_footer BOOLEAN NOT NULL DEFAULT true,
+  show_image BOOLEAN NOT NULL DEFAULT true,
+  accent_color TEXT NOT NULL DEFAULT '',
+  bg_color TEXT NOT NULL DEFAULT '',
+  text_color TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE embed_cards ADD COLUMN IF NOT EXISTS spark_days INTEGER NOT NULL DEFAULT 30;
+ALTER TABLE embed_cards ADD COLUMN IF NOT EXISTS show_subtitle BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE embed_cards ADD COLUMN IF NOT EXISTS show_hot BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE embed_cards ADD COLUMN IF NOT EXISTS show_stat_downloads BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE embed_cards ADD COLUMN IF NOT EXISTS show_stat_week BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE embed_cards ADD COLUMN IF NOT EXISTS show_stat_third BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE embed_cards ADD COLUMN IF NOT EXISTS show_footer BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE embed_cards ADD COLUMN IF NOT EXISTS show_image BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE embed_cards ADD COLUMN IF NOT EXISTS accent_color TEXT NOT NULL DEFAULT '';
+ALTER TABLE embed_cards ADD COLUMN IF NOT EXISTS bg_color TEXT NOT NULL DEFAULT '';
+ALTER TABLE embed_cards ADD COLUMN IF NOT EXISTS text_color TEXT NOT NULL DEFAULT '';
+-- Old column from before per-stat toggles existed; no longer written or read.
+ALTER TABLE embed_cards DROP COLUMN IF EXISTS show_stats;
+
+DROP INDEX IF EXISTS embed_cards_combo_idx;
+CREATE UNIQUE INDEX IF NOT EXISTS embed_cards_combo_idx
+  ON embed_cards (
+    type, entity_id, theme, spark, spark_days, show_subtitle, show_hot,
+    show_stat_downloads, show_stat_week, show_stat_third, show_footer, show_image,
+    accent_color, bg_color, text_color
+  );
