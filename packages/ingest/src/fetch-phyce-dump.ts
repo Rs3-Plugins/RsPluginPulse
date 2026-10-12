@@ -65,8 +65,14 @@ async function gunzip(src: string, dest: string): Promise<void> {
 // `tar.gz` and plain `tar` both show up in the wild for dumps this size --
 // gunzip only strips the outer gzip layer, so what's left can itself be a
 // tar archive wrapping the real .sql file.
+//
+// On Windows, the `tar` found via PATH in a bash-style shell is usually
+// MSYS2/GNU tar, which misreads a `D:\...` path as `host:path` remote-archive
+// syntax ("Cannot connect to D:"). Windows' own bundled tar.exe (bsdtar,
+// System32) handles drive letters fine, so use that one explicitly there.
 function untar(src: string, destDir: string): string {
-  execFileSync("tar", ["-xf", src, "-C", destDir], { stdio: "inherit" });
+  const tarBin = process.platform === "win32" ? path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe") : "tar";
+  execFileSync(tarBin, ["-xf", src, "-C", destDir], { stdio: "inherit" });
   const sqlFile = fs.readdirSync(destDir).find((f) => f.endsWith(".sql"));
   if (!sqlFile) throw new Error(`extracted tar ${src} but found no .sql file inside`);
   return path.join(destDir, sqlFile);
