@@ -62,12 +62,17 @@ async function authorDailySeries(pluginIds: number[], days: number): Promise<num
   return sorted.slice(-days).map(([, v]) => v);
 }
 
-function sparklineShapes(values: number[], width: number, height: number): { line: string; area: string } | null {
-  if (values.length < 2) return null;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+// Not enough real history for a meaningful line (new plugin/author, or a
+// game with no daily figure at all) still draws a flat one, at whatever
+// single value is known or 0 if there's none -- it's only ever omitted
+// entirely via options.spark=false at the call site, never because the
+// data happened to be thin.
+function sparklineShapes(values: number[], width: number, height: number): { line: string; area: string } {
+  const padded = values.length >= 2 ? values : values.length === 1 ? [values[0], values[0]] : [0, 0];
+  const min = Math.min(...padded);
+  const max = Math.max(...padded);
   const range = max - min || 1;
-  const pts = values.map((v, i) => [(i / (values.length - 1)) * width, height - ((v - min) / range) * height] as const);
+  const pts = padded.map((v, i) => [(i / (padded.length - 1)) * width, height - ((v - min) / range) * height] as const);
   const line = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
   const area = `${line} L ${width.toFixed(1)} ${height.toFixed(1)} L 0 ${height.toFixed(1)} Z`;
   return { line, area };
@@ -213,9 +218,13 @@ export async function renderCardSvg(type: EmbedCardType, entityId: number, optio
     const blockStartX = PAD + (innerWidth - colW * stats.length) / 2;
     statsBlock = stats
       .map((s, i) => {
-        const x = (blockStartX + i * colW).toFixed(1);
-        return `<text x="${x}" y="${statsTopY + 12}" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="10" font-weight="700" letter-spacing="0.06em" fill="${pal.dim}">${escapeXml(s.label.toUpperCase())}</text>
-                <text x="${x}" y="${statsTopY + 32}" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="17" font-weight="700" fill="${pal.text}">${escapeXml(s.value)}</text>`;
+        // Centered within its own cell (not left-anchored at the cell's
+        // edge) -- otherwise the visible text skews left of the cell
+        // group's true center, most noticeably when fewer than 3 stats
+        // are shown (e.g. RuneLite authors, which never get a third).
+        const x = (blockStartX + i * colW + colW / 2).toFixed(1);
+        return `<text x="${x}" y="${statsTopY + 12}" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="10" font-weight="700" letter-spacing="0.06em" fill="${pal.dim}">${escapeXml(s.label.toUpperCase())}</text>
+                <text x="${x}" y="${statsTopY + 32}" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="17" font-weight="700" fill="${pal.text}">${escapeXml(s.value)}</text>`;
       })
       .join("\n");
     y += 40;
@@ -247,9 +256,23 @@ export async function renderCardSvg(type: EmbedCardType, entityId: number, optio
   const height = y + PAD;
   const subtitleText = options.showSubtitle ? `<text x="${nameX}" y="50" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="12" fill="${pal.muted}">${escapeXml(sub)}</text>` : "";
 
+  // The top accent "bar" is actually the card outline's own top-left/
+  // top-right quarter-circle corners (radius 10, matching the card rect
+  // below) traced as a stroked path, not a clipped rect: a 2-3px-tall
+  // sliver of a 10px-radius curve reads as a near-straight diagonal
+  // rather than a rounded corner, so it needs the full quarter-arc.
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" font-variant-numeric="tabular-nums">
+  <defs>
+    <linearGradient id="goldFade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="${pal.gold}" stop-opacity="0" />
+      <stop offset="12%" stop-color="${pal.gold}" stop-opacity="1" />
+      <stop offset="88%" stop-color="${pal.gold}" stop-opacity="1" />
+      <stop offset="100%" stop-color="${pal.gold}" stop-opacity="0" />
+    </linearGradient>
+  </defs>
   <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="10" fill="${pal.bg}" stroke="${pal.border}" />
-  <rect x="2" y="1" width="${width - 4}" height="2" fill="${pal.gold}" />
+  <path d="M 0.5 10.5 A 10 10 0 0 1 10.5 0.5 L ${width - 10.5} 0.5 A 10 10 0 0 1 ${width - 0.5} 10.5"
+        fill="none" stroke="url(#goldFade)" stroke-width="2.5" stroke-linecap="round" />
   ${icon}
   <text x="${nameX}" y="32" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="16" font-weight="700" fill="${pal.text}">${escapeXml(name)}</text>
   ${subtitleText}
@@ -262,10 +285,13 @@ export async function renderCardSvg(type: EmbedCardType, entityId: number, optio
 
 // Discord (and most chat apps) don't render inline SVG in link
 // previews/embeds -- treats it as a generic file instead of an image -- so
-// cards ship as PNG. Rendered at 2x density so it stays crisp if a client
-// scales it up, same reasoning a @2x asset would get.
+// cards ship as PNG. Rendered 1:1 with the SVG's own declared width/height
+// (not at a higher density): a raster image's pixel size *is* its display
+// size wherever it's embedded with no explicit width override (our own
+// preview, Discord, a bare <img> tag), so doubling the pixel dimensions
+// for sharpness also doubles how big it shows up everywhere.
 export async function renderCardPng(type: EmbedCardType, entityId: number, options: EmbedCardOptions): Promise<Buffer | null> {
   const svg = await renderCardSvg(type, entityId, options);
   if (!svg) return null;
-  return sharp(Buffer.from(svg), { density: 144 }).png().toBuffer();
+  return sharp(Buffer.from(svg)).png().toBuffer();
 }
