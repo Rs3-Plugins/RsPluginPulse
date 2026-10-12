@@ -300,13 +300,6 @@ body {
   gap: 6px;
 }
 
-.kofi-link {
-  display: inline-flex;
-  align-items: center;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
 .randomizer-btn:disabled {
   cursor: default;
   opacity: 0.8;

@@ -23,6 +23,7 @@ export function Footer() {
               Join our Discord ↗
             </a>
             <a href="https://ko-fi.com/mark7625" target="_blank" rel="noopener" className="footer-kofi">
+              <CoffeeIcon />
               Buy me a coffee ↗
             </a>
             <button className="footer-link" onClick={() => setLegalDoc("cookies")}>
@@ -44,5 +45,15 @@ export function Footer() {
 
       {legalDoc && <LegalModal doc={legalDoc} onClose={() => setLegalDoc(null)} />}
     </footer>
+  );
+}
+
+function CoffeeIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2.5 6.5h9v3.5a3 3 0 01-3 3h-3a3 3 0 01-3-3V6.5Z" />
+      <path d="M11.5 7h1a1.8 1.8 0 010 3.6h-1" />
+      <path d="M5.2 4.3c-.4-.5-.4-1 0-1.6M7.8 4.3c-.4-.5-.4-1 0-1.6" />
+    </svg>
   );
 }

@@ -116,10 +116,6 @@ export function Header() {
           </button>
 
           <div className="header-controls-desktop">
-            <a href="https://ko-fi.com/mark7625" target="_blank" rel="noopener" className="theme-toggle kofi-link">
-              Buy me a coffee
-            </a>
-
             <GameSwitcher updatedLabel={updatedLabel} sourceLabel={dataSourceLabel(game)} />
 
             <button
@@ -192,9 +188,6 @@ export function Header() {
             <button className="theme-toggle" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
               {theme === "dark" ? "Light mode" : "Dark mode"}
             </button>
-            <a href="https://ko-fi.com/mark7625" target="_blank" rel="noopener" className="theme-toggle kofi-link">
-              Buy me a coffee
-            </a>
           </div>
         </div>
       )}
