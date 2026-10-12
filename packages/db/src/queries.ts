@@ -354,6 +354,29 @@ async function topPluginsByGain(cutoffDays: number, game: string, limit: number)
   return rows.map(toPluginRow);
 }
 
+// Rank of specific plugins within the alltime/hot leaderboard, without
+// fetching the whole catalog to find them by linear search -- same
+// per-plugin value and excluded tag as getTopPlugins, just counted in SQL
+// and filtered down to the requested ids before anything crosses the wire.
+export async function getPluginRanks(pluginIds: number[], metric: "alltime" | "hot", game = "rs3"): Promise<Map<number, number>> {
+  if (pluginIds.length === 0) return new Map();
+  const pool = getPool();
+  const column = metric === "hot" ? "downloads_today" : "downloads_total";
+  const { rows } = await pool.query(
+    `WITH ranked AS (
+       SELECT p.id, RANK() OVER (ORDER BY l.${column} DESC) AS rank
+       FROM plugins p
+       JOIN LATERAL (
+         SELECT ${column} FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
+       ) l ON true
+       WHERE p.game = $2 AND NOT ($3 = ANY(p.tags))
+     )
+     SELECT id, rank FROM ranked WHERE id = ANY($1::int[])`,
+    [pluginIds, game, LEADERBOARD_EXCLUDED_TAG],
+  );
+  return new Map(rows.map((row) => [row.id, Number(row.rank)]));
+}
+
 // Ranks by growth *rate* rather than raw gain, so a small plugin that
 // doubled its downloads ranks above a huge plugin that gained more in
 // absolute terms. Denominators are clamped to a floor so brand-new
@@ -437,6 +460,56 @@ export async function getTopAuthors(period: Period, limit = 50, game = "rs3"): P
   return Array.from(byAuthor.values())
     .sort((a, b) => b.value - a.value)
     .slice(0, limit);
+}
+
+// Rank of specific authors within a period's leaderboard, without fetching
+// (or sorting, in JS) every author to find them by linear search -- same
+// per-author value as getTopAuthors (primary author only, same excluded
+// tag), just aggregated+ranked in SQL and filtered down to the requested
+// ids before anything crosses the wire. Authors with no ranked plugins at
+// all (e.g. only ever a secondary/co-author) are simply absent from the
+// returned map.
+export async function getAuthorRanks(authorIds: number[], period: Period, game = "rs3"): Promise<Map<number, number>> {
+  if (authorIds.length === 0) return new Map();
+  const pool = getPool();
+
+  const valueSql =
+    period === "hot"
+      ? "l.downloads_today"
+      : period === "alltime"
+        ? "l.downloads_total"
+        : "l.downloads_total - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total)";
+  const cutoffDays = period === "monthly" ? 30 : 7;
+  const needsGainJoins = period === "weekly" || period === "monthly";
+
+  const { rows } = await pool.query(
+    `WITH per_author AS (
+       SELECT p.author_id, SUM(${valueSql}) AS value
+       FROM plugins p
+       JOIN LATERAL (
+         SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
+       ) l ON true
+       ${
+         needsGainJoins
+           ? `LEFT JOIN LATERAL (
+                SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at <= now() - ($4 * interval '1 day')
+                ORDER BY s.captured_at DESC LIMIT 1
+              ) b1 ON true
+              LEFT JOIN LATERAL (
+                SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at ASC LIMIT 1
+              ) b2 ON true`
+           : ""
+       }
+       WHERE p.game = $2 AND NOT ($3 = ANY(p.tags))
+       GROUP BY p.author_id
+     ),
+     ranked AS (
+       SELECT author_id, RANK() OVER (ORDER BY value DESC) AS rank FROM per_author
+     )
+     SELECT author_id, rank FROM ranked WHERE author_id = ANY($1::int[])`,
+    needsGainJoins ? [authorIds, game, LEADERBOARD_EXCLUDED_TAG, cutoffDays] : [authorIds, game, LEADERBOARD_EXCLUDED_TAG],
+  );
+  return new Map(rows.map((row) => [row.author_id, Number(row.rank)]));
 }
 
 // Trending fallback for an empty query, plus a name/author substring
@@ -677,17 +750,13 @@ export async function getAuthorProfile(authorId: number): Promise<AuthorProfile 
   if (rows.length === 0) return null;
   const game = rows[0].game;
 
-  const [hotPlugins, allTimeAuthors, hotAuthors, weeklyAuthors] = await Promise.all([
+  const [hotPlugins, allTimeRanks, hotRanks, weeklyRanks] = await Promise.all([
     getTopPlugins("hot", 10, game),
-    getTopAuthors("alltime", 10000, game),
-    getTopAuthors("hot", 10000, game),
-    getTopAuthors("weekly", 10000, game),
+    getAuthorRanks([authorId], "alltime", game),
+    getAuthorRanks([authorId], "hot", game),
+    getAuthorRanks([authorId], "weekly", game),
   ]);
   const hotPluginIds = new Set(hotPlugins.map((p) => p.id));
-  const rankOf = (list: AuthorLeaderboardRow[]) => {
-    const index = list.findIndex((a) => a.authorId === authorId);
-    return index === -1 ? null : index + 1;
-  };
 
   const plugins = rows.map((row) => ({
     id: row.id,
@@ -715,9 +784,9 @@ export async function getAuthorProfile(authorId: number): Promise<AuthorProfile 
       subscribersTotal: rows.reduce((sum, r) => sum + Number(r.subscribers_total), 0),
     },
     ranks: {
-      allTime: rankOf(allTimeAuthors),
-      hotToday: rankOf(hotAuthors),
-      hotWeek: rankOf(weeklyAuthors),
+      allTime: allTimeRanks.get(authorId) ?? null,
+      hotToday: hotRanks.get(authorId) ?? null,
+      hotWeek: weeklyRanks.get(authorId) ?? null,
     },
     plugins,
   };
@@ -1111,11 +1180,10 @@ export async function getCompareData(type: CompareType, keys: number[], metric: 
     const byId = new Map<number, (typeof rows)[number]>(rows.map((r) => [r.id, r]));
     const orderedKeys = keys.filter((k) => byId.has(k));
     const game = byId.get(orderedKeys[0])!.game;
-    const [allTime, hot] = await Promise.all([getTopPlugins("alltime", 10000, game), getTopPlugins("hot", 10000, game)]);
-    const rankOf = (list: PluginLeaderboardRow[], id: number) => {
-      const i = list.findIndex((p) => p.id === id);
-      return i === -1 ? null : i + 1;
-    };
+    const [allTimeRanks, hotRanks] = await Promise.all([
+      getPluginRanks(orderedKeys, "alltime", game),
+      getPluginRanks(orderedKeys, "hot", game),
+    ]);
 
     const { fromDate, toDate } = resolveCompareRange(
       range,
@@ -1137,8 +1205,8 @@ export async function getCompareData(type: CompareType, keys: number[], metric: 
           week: Number(row.total_now) - Number(row.total_7),
           month: Number(row.total_now) - Number(row.total_30),
           subs: Number(row.subs_now),
-          rank: rankOf(allTime, id),
-          hotRank: rankOf(hot, id),
+          rank: allTimeRanks.get(id) ?? null,
+          hotRank: hotRanks.get(id) ?? null,
           count: null,
           start: row.date_added.toISOString(),
         },
@@ -1162,11 +1230,8 @@ export async function getCompareData(type: CompareType, keys: number[], metric: 
     byAuthor.get(authorId)!.reduce((min, r) => (r.date_added < min ? r.date_added : min), byAuthor.get(authorId)![0].date_added);
   const game = pluginRows[0].game;
 
-  const allTimeAuthors = await getTopAuthors("alltime", 10000, game);
-  const rankOfAuthor = (authorId: number) => {
-    const i = allTimeAuthors.findIndex((a) => a.authorId === authorId);
-    return i === -1 ? null : i + 1;
-  };
+  const authorRanks = await getAuthorRanks(orderedKeys, "alltime", game);
+  const rankOfAuthor = (authorId: number) => authorRanks.get(authorId) ?? null;
 
   const { fromDate, toDate } = resolveCompareRange(
     range,

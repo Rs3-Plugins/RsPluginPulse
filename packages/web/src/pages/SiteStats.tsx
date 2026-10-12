@@ -130,8 +130,10 @@ export function SiteStats() {
   useEffect(() => {
     setPluginCandidates(null);
     setAuthorCandidates(null);
-    getTopPlugins("alltime", game).then((r) => setPluginCandidates(r.plugins));
-    getTopAuthors("alltime", game).then((r) => setAuthorCandidates(r.authors));
+    // Just feeds the compare-picker's client-side search -- same reasoning
+    // as the API explorer's picker, no need for the full 10000-row catalog.
+    getTopPlugins("alltime", game, 500).then((r) => setPluginCandidates(r.plugins));
+    getTopAuthors("alltime", game, 500).then((r) => setAuthorCandidates(r.authors));
   }, [game]);
 
   const explicitIds =
