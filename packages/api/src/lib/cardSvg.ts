@@ -213,9 +213,13 @@ export async function renderCardSvg(type: EmbedCardType, entityId: number, optio
     const blockStartX = PAD + (innerWidth - colW * stats.length) / 2;
     statsBlock = stats
       .map((s, i) => {
-        const x = (blockStartX + i * colW).toFixed(1);
-        return `<text x="${x}" y="${statsTopY + 12}" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="10" font-weight="700" letter-spacing="0.06em" fill="${pal.dim}">${escapeXml(s.label.toUpperCase())}</text>
-                <text x="${x}" y="${statsTopY + 32}" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="17" font-weight="700" fill="${pal.text}">${escapeXml(s.value)}</text>`;
+        // Centered within its own cell (not left-anchored at the cell's
+        // edge) -- otherwise the visible text skews left of the cell
+        // group's true center, most noticeably when fewer than 3 stats
+        // are shown (e.g. RuneLite authors, which never get a third).
+        const x = (blockStartX + i * colW + colW / 2).toFixed(1);
+        return `<text x="${x}" y="${statsTopY + 12}" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="10" font-weight="700" letter-spacing="0.06em" fill="${pal.dim}">${escapeXml(s.label.toUpperCase())}</text>
+                <text x="${x}" y="${statsTopY + 32}" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="17" font-weight="700" fill="${pal.text}">${escapeXml(s.value)}</text>`;
       })
       .join("\n");
     y += 40;
