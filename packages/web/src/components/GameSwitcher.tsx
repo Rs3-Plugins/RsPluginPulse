@@ -13,7 +13,7 @@ export interface GameOption {
 
 export const GAMES: GameOption[] = [
   {
-    key: "rs3",
+    key: "runescape",
     name: "RuneScape",
     shortName: "RuneScape",
     sub: "Tracking live",

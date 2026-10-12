@@ -253,11 +253,11 @@ async function getJson<T>(path: string): Promise<T> {
   return response.json();
 }
 
-export function getTopPlugins(period: Period, game: Game = "rs3", limit = 10000) {
+export function getTopPlugins(period: Period, game: Game = "runescape", limit = 10000) {
   return getJson<{ period: Period; plugins: PluginLeaderboardRow[] }>(`/api/leaderboard/plugins?period=${period}&limit=${limit}&game=${game}`);
 }
 
-export function getTopAuthors(period: Period, game: Game = "rs3", limit = 10000) {
+export function getTopAuthors(period: Period, game: Game = "runescape", limit = 10000) {
   return getJson<{ period: Period; authors: AuthorLeaderboardRow[] }>(`/api/leaderboard/authors?period=${period}&limit=${limit}&game=${game}`);
 }
 
@@ -271,24 +271,24 @@ export interface PluginInfo extends PluginMeta {
 // Basic metadata + current stats, no snapshot history -- a cheaper call
 // than getPluginTrend for callers that only want "what are this plugin's
 // numbers right now".
-export function getPluginInfo(id: string | number, game: Game = "rs3") {
+export function getPluginInfo(id: string | number, game: Game = "runescape") {
   return getJson<PluginInfo>(`/api/plugins/${encodeURIComponent(id)}?game=${game}`);
 }
 
 // `id` may be a numeric id (globally unique, no game needed) or a pretty
 // slug ("117hd") -- slugs are only unique per game, so `game` matters for
 // those. Always sent; the API ignores it for a numeric id.
-export function getPluginTrend(id: string | number, game: Game = "rs3") {
+export function getPluginTrend(id: string | number, game: Game = "runescape") {
   return getJson<{ pluginId: number; plugin: PluginMeta; trend: PluginTrendPoint[] }>(
     `/api/plugins/${encodeURIComponent(id)}/trend?game=${game}`,
   );
 }
 
-export function getAuthorProfile(id: string | number, game: Game = "rs3") {
+export function getAuthorProfile(id: string | number, game: Game = "runescape") {
   return getJson<AuthorProfile>(`/api/authors/${encodeURIComponent(id)}?game=${game}`);
 }
 
-export function search(query: string, game: Game = "rs3", limit?: number) {
+export function search(query: string, game: Game = "runescape", limit?: number) {
   const params = new URLSearchParams({ q: query, game });
   if (limit) params.set("limit", String(limit));
   return getJson<SearchResult>(`/api/search?${params}`);
@@ -298,27 +298,27 @@ export function getStatus(game?: Game) {
   return getJson<{ updatedAt: string | null }>(`/api/status${game ? `?game=${game}` : ""}`);
 }
 
-export function getFastestGrowingPlugins(limit = 5, days = 7, game: Game = "rs3") {
+export function getFastestGrowingPlugins(limit = 5, days = 7, game: Game = "runescape") {
   return getJson<{ plugins: FastestGrowingPlugin[] }>(`/api/leaderboard/fastest-growing?limit=${limit}&days=${days}&game=${game}`);
 }
 
-export function getRandomPlugin(game: Game = "rs3") {
+export function getRandomPlugin(game: Game = "runescape") {
   return getJson<{ id: number; nameId: string }>(`/api/plugins/random?game=${game}`);
 }
 
-export function getNewestPlugins(limit = 50, game: Game = "rs3") {
+export function getNewestPlugins(limit = 50, game: Game = "runescape") {
   return getJson<{ plugins: NewestPluginRow[] }>(`/api/leaderboard/newest?limit=${limit}&game=${game}`);
 }
 
-export function getSiteStats(game: Game = "rs3") {
+export function getSiteStats(game: Game = "runescape") {
   return getJson<SiteStats>(`/api/stats?game=${game}`);
 }
 
-export function getStatsOverview(range: 30 | 90 | 365 = 90, game: Game = "rs3") {
+export function getStatsOverview(range: 30 | 90 | 365 = 90, game: Game = "runescape") {
   return getJson<StatsOverview>(`/api/stats/overview?range=${range}&game=${game}`);
 }
 
-export function getCategoryStatsPage(page: number, pageSize: number, game: Game = "rs3") {
+export function getCategoryStatsPage(page: number, pageSize: number, game: Game = "runescape") {
   return getJson<CategoryStatsPage>(`/api/stats/categories?page=${page}&pageSize=${pageSize}&game=${game}`);
 }
 

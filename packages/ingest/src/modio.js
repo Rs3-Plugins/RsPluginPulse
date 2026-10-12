@@ -36,7 +36,7 @@ function toIngestedMod(mod) {
     const authorProfileUrl = mod.submitted_by.profile_url ?? `https://mod.io/u/${mod.submitted_by.name_id}`;
     const authorAvatarUrl = mod.submitted_by.avatar?.thumb_100x100 ?? null;
     return {
-        game: "rs3",
+        game: "runescape",
         id: mod.id,
         nameId: mod.name_id,
         name: mod.name,

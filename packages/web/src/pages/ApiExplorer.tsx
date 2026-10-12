@@ -74,7 +74,7 @@ interface Token {
 
 const PERIOD_OPTIONS = ["alltime", "hot", "weekly", "monthly"];
 // osrs isn't ingested yet -- same reasoning as hiding it from the site nav.
-const GAME_OPTIONS = ["rs3", "runelite"];
+const GAME_OPTIONS = ["runescape", "runelite"];
 const MAX_LINES = 1200;
 const TAB_LABELS: { key: Tab; label: string }[] = [
   { key: "body", label: "Body" },
@@ -179,7 +179,7 @@ const ENDPOINTS: EndpointDef[] = [
     path: "/api/status",
     title: "Status",
     desc: "Timestamp of the most recent ingest snapshot — what the header's “updated N min ago” label is built from.",
-    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's ingest to check." }],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game's ingest to check." }],
   },
   {
     key: "search",
@@ -188,7 +188,7 @@ const ENDPOINTS: EndpointDef[] = [
     desc: "Plugins and authors matching a query, ranked by name match quality then total downloads. An empty query returns the top 5 plugins and top 3 authors by weekly gain (\"trending\") — this is what the header search box uses.",
     queryParams: [
       { name: "q", type: "string", placeholder: "e.g. xp", desc: "Search text. Empty returns trending plugins/authors instead." },
-      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's catalog to search." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game's catalog to search." },
       { name: "limit", type: "int", default: "6", desc: "Max plugin rows to return (authors scale down proportionally), max 20." },
     ],
   },
@@ -206,7 +206,7 @@ const ENDPOINTS: EndpointDef[] = [
         desc: "alltime = lifetime downloads, hot = downloads today, weekly/monthly = downloads gained.",
       },
       { name: "limit", type: "int", default: "50", desc: "Rows to return, max 10000." },
-      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's catalog to rank." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game's catalog to rank." },
     ],
   },
   {
@@ -223,7 +223,7 @@ const ENDPOINTS: EndpointDef[] = [
         desc: "Same semantics as the plugin leaderboard, summed across each author's plugins.",
       },
       { name: "limit", type: "int", default: "50", desc: "Rows to return, max 10000." },
-      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's catalog to rank." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game's catalog to rank." },
     ],
   },
   {
@@ -233,7 +233,7 @@ const ENDPOINTS: EndpointDef[] = [
     desc: "Most recently added plugins, newest first.",
     queryParams: [
       { name: "limit", type: "int", default: "50", desc: "Rows to return, max 10000." },
-      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's catalog to list." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game's catalog to list." },
     ],
   },
   {
@@ -244,7 +244,7 @@ const ENDPOINTS: EndpointDef[] = [
     queryParams: [
       { name: "limit", type: "int", default: "5", desc: "Rows to return, max 100." },
       { name: "days", type: "int", default: "7", desc: "Window size in days, 1–365." },
-      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's catalog to rank." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game's catalog to rank." },
     ],
   },
   {
@@ -252,7 +252,7 @@ const ENDPOINTS: EndpointDef[] = [
     path: "/api/plugins/random",
     title: "Random plugin",
     desc: "A random plugin id — powers the header's Randomizer button.",
-    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game to pick from." }],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game to pick from." }],
   },
   {
     key: "plugin-info",
@@ -262,7 +262,7 @@ const ENDPOINTS: EndpointDef[] = [
     pathParams: [
       { name: "id", type: "int", required: true, desc: "Plugin id or name slug (e.g. 117hd). Search by name below.", pickerKind: "plugin" },
     ],
-    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Only needed when id is a slug (slugs are unique per game)." }],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Only needed when id is a slug (slugs are unique per game)." }],
   },
   {
     key: "plugin-trend",
@@ -272,7 +272,7 @@ const ENDPOINTS: EndpointDef[] = [
     pathParams: [
       { name: "id", type: "int", required: true, desc: "Plugin id or name slug (e.g. 117hd). Search by name below.", pickerKind: "plugin" },
     ],
-    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Only needed when id is a slug (slugs are unique per game)." }],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Only needed when id is a slug (slugs are unique per game)." }],
   },
   {
     key: "author-profile",
@@ -282,7 +282,7 @@ const ENDPOINTS: EndpointDef[] = [
     pathParams: [
       { name: "id", type: "int", required: true, desc: "Author id or name slug (e.g. jin-jiyunsun). Search by name below.", pickerKind: "author" },
     ],
-    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Only needed when id is a slug (slugs are unique per game)." }],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Only needed when id is a slug (slugs are unique per game)." }],
   },
   {
     key: "badge",
@@ -308,7 +308,7 @@ const ENDPOINTS: EndpointDef[] = [
     path: "/api/stats",
     title: "Site stats (summary)",
     desc: "A small summary: plugin/author counts and lifetime downloads. Use Stats overview below for the full dashboard payload.",
-    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game to summarize." }],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game to summarize." }],
   },
   {
     key: "stats-overview",
@@ -317,7 +317,7 @@ const ENDPOINTS: EndpointDef[] = [
     desc: "Everything the Stats page's Overview tab renders: daily download totals, fastest-growing plugins, and newest releases. Categories are a separate paginated endpoint below.",
     queryParams: [
       { name: "range", type: "enum", options: ["30", "90", "365"], default: "90", desc: "Visible window in days for the daily chart." },
-      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game to summarize." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game to summarize." },
     ],
   },
   {
@@ -328,7 +328,7 @@ const ENDPOINTS: EndpointDef[] = [
     queryParams: [
       { name: "page", type: "int", default: "1", desc: "1-based page number." },
       { name: "pageSize", type: "int", default: "10", desc: "Rows per page, max 100." },
-      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's tag cloud to read." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game's tag cloud to read." },
     ],
   },
   {
@@ -461,7 +461,7 @@ export function ApiExplorer() {
     for (const p of allParams) {
       // A "game" param defaults to whatever game the site is currently
       // scoped to, so the example request matches what you're looking at
-      // instead of always starting from rs3.
+      // instead of always starting from runescape.
       const fallback = p.name === "game" ? game : p.default;
       out[p.name] = current[p.name] ?? fallback ?? "";
     }

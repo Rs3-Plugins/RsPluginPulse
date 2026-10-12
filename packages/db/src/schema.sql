@@ -37,13 +37,20 @@ ALTER TABLE plugins ADD COLUMN IF NOT EXISTS ratings_negative INTEGER NOT NULL D
 ALTER TABLE plugins ADD COLUMN IF NOT EXISTS ratings_percentage_positive INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE plugins ADD COLUMN IF NOT EXISTS ratings_display_text TEXT NOT NULL DEFAULT '';
 
--- Multi-game support. 'rs3' (mod.io) is the original/default scope; new
--- games (e.g. 'runelite') live in the same tables so the API and site
+-- Multi-game support. 'runescape' (mod.io) is the original/default scope;
+-- new games (e.g. 'runelite') live in the same tables so the API and site
 -- logic stay identical and only filter by this column. mod.io's plugin
 -- and author ids are real upstream integers; non-mod.io games mint their
 -- own surrogate integer ids (see external_id_map below) so every existing
 -- `Number(id)`-based route/page keeps working unmodified.
-ALTER TABLE plugins ADD COLUMN IF NOT EXISTS game TEXT NOT NULL DEFAULT 'rs3';
+ALTER TABLE plugins ADD COLUMN IF NOT EXISTS game TEXT NOT NULL DEFAULT 'runescape';
+
+-- Renamed from the original 'rs3' key -- idempotent (a no-op once every
+-- row has already been migrated), safe to leave in permanently rather
+-- than adding a one-off migration script for it.
+UPDATE plugins SET game = 'runescape' WHERE game = 'rs3';
+ALTER TABLE plugins ALTER COLUMN game SET DEFAULT 'runescape';
+
 CREATE INDEX IF NOT EXISTS plugins_game_idx ON plugins (game);
 
 -- Stable integer ids for entities that don't have a native numeric id
@@ -107,6 +114,11 @@ ALTER TABLE plugin_snapshots ADD COLUMN IF NOT EXISTS game TEXT;
 
 UPDATE plugin_snapshots s SET game = p.game
   FROM plugins p WHERE p.id = s.plugin_id AND s.game IS NULL;
+
+-- Same 'rs3' -> 'runescape' rename as plugins.game above -- this one
+-- already had a value (backfilled, not NULL) before the rename, so it
+-- needs its own explicit pass rather than relying on the IS NULL backfill.
+UPDATE plugin_snapshots SET game = 'runescape' WHERE game = 'rs3';
 
 CREATE INDEX IF NOT EXISTS plugin_snapshots_game_captured_idx
   ON plugin_snapshots (game, captured_at DESC);

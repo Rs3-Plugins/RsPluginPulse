@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useGame } from "../context/GameContext";
 
 // Keeps the current page's URL carrying `?game=` whenever we're off the
-// default game (rs3), so leaderboard/stats/compare links can be shared and
+// default game (runescape), so leaderboard/stats/compare links can be shared and
 // reopen in the right game -- plugin/author pages don't need this since
 // their id alone already implies the game. Re-checks on every params
 // change (not just game changes) so a page rebuilding its own query string
@@ -15,7 +15,7 @@ export function GameUrlSync() {
 
   useEffect(() => {
     const current = searchParams.get("game");
-    if (game === "rs3") {
+    if (game === "runescape") {
       if (current !== null) {
         const next = new URLSearchParams(searchParams);
         next.delete("game");

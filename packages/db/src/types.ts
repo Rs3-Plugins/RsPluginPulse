@@ -90,7 +90,7 @@ export interface PluginTrendPoint {
   subscribersTotal: number;
 }
 
-export type GameKey = "rs3" | "osrs" | "runelite";
+export type GameKey = "runescape" | "osrs" | "runelite";
 
 export interface CoAuthorIngest {
   authorId: number;

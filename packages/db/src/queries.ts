@@ -161,7 +161,7 @@ export async function getEmbedCard(id: string): Promise<EmbedCardConfig | null> 
   };
 }
 
-export async function getRandomPluginId(game = "rs3"): Promise<{ id: number; nameId: string } | null> {
+export async function getRandomPluginId(game = "runescape"): Promise<{ id: number; nameId: string } | null> {
   const pool = getPool();
   const { rows } = await pool.query(`SELECT id, name_id FROM plugins WHERE game = $1 ORDER BY random() LIMIT 1`, [game]);
   if (rows.length === 0) return null;
@@ -171,7 +171,7 @@ export async function getRandomPluginId(game = "rs3"): Promise<{ id: number; nam
 // Newest plugins first -- unlike the leaderboards, this intentionally
 // includes everything (no library-tag exclusion) since it's about
 // discoverability, not ranking fairness.
-export async function getNewestPlugins(limit = 50, game = "rs3"): Promise<NewestPluginRow[]> {
+export async function getNewestPlugins(limit = 50, game = "runescape"): Promise<NewestPluginRow[]> {
   const pool = getPool();
   const { rows } = await pool.query(
     `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.profile_url, p.tags, p.logo_url, p.date_added, l.downloads_total
@@ -199,7 +199,7 @@ export async function getNewestPlugins(limit = 50, game = "rs3"): Promise<Newest
   }));
 }
 
-export async function getSiteStats(game = "rs3"): Promise<SiteStats> {
+export async function getSiteStats(game = "runescape"): Promise<SiteStats> {
   const pool = getPool();
   const { rows } = await pool.query(
     `SELECT
@@ -362,7 +362,7 @@ async function topPluginsByGain(cutoffDays: number, game: string, limit: number)
 // fetching the whole catalog to find them by linear search -- same
 // per-plugin value and excluded tag as getTopPlugins, just counted in SQL
 // and filtered down to the requested ids before anything crosses the wire.
-export async function getPluginRanks(pluginIds: number[], metric: "alltime" | "hot", game = "rs3"): Promise<Map<number, number>> {
+export async function getPluginRanks(pluginIds: number[], metric: "alltime" | "hot", game = "runescape"): Promise<Map<number, number>> {
   if (pluginIds.length === 0) return new Map();
   const pool = getPool();
   const column = metric === "hot" ? "downloads_today" : "downloads_total";
@@ -385,7 +385,7 @@ export async function getPluginRanks(pluginIds: number[], metric: "alltime" | "h
 // doubled its downloads ranks above a huge plugin that gained more in
 // absolute terms. Denominators are clamped to a floor so brand-new
 // plugins with a near-zero baseline don't produce absurd percentages.
-export async function getFastestGrowingPlugins(limit = 5, cutoffDays = 7, game = "rs3"): Promise<FastestGrowingPlugin[]> {
+export async function getFastestGrowingPlugins(limit = 5, cutoffDays = 7, game = "runescape"): Promise<FastestGrowingPlugin[]> {
   const pool = getPool();
   const { rows } = await pool.query(
     `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.profile_url,
@@ -437,14 +437,14 @@ export async function getFastestGrowingPlugins(limit = 5, cutoffDays = 7, game =
     .filter((p) => p.growthScore > 0);
 }
 
-export async function getTopPlugins(period: Period, limit = 50, game = "rs3"): Promise<PluginLeaderboardRow[]> {
+export async function getTopPlugins(period: Period, limit = 50, game = "runescape"): Promise<PluginLeaderboardRow[]> {
   if (period === "alltime") return topPluginsByLatestMetric("downloads_total", game, limit);
   if (period === "hot") return topPluginsByLatestMetric("downloads_today", game, limit);
   if (period === "weekly") return topPluginsByGain(7, game, limit);
   return topPluginsByGain(30, game, limit);
 }
 
-export async function getTopAuthors(period: Period, limit = 50, game = "rs3"): Promise<AuthorLeaderboardRow[]> {
+export async function getTopAuthors(period: Period, limit = 50, game = "runescape"): Promise<AuthorLeaderboardRow[]> {
   const plugins = await getTopPlugins(period, 10000, game);
   const byAuthor = new Map<number, AuthorLeaderboardRow>();
   for (const plugin of plugins) {
@@ -475,7 +475,7 @@ export async function getTopAuthors(period: Period, limit = 50, game = "rs3"): P
 // ids before anything crosses the wire. Authors with no ranked plugins at
 // all (e.g. only ever a secondary/co-author) are simply absent from the
 // returned map.
-export async function getAuthorRanks(authorIds: number[], period: Period, game = "rs3"): Promise<Map<number, number>> {
+export async function getAuthorRanks(authorIds: number[], period: Period, game = "runescape"): Promise<Map<number, number>> {
   if (authorIds.length === 0) return new Map();
   const pool = getPool();
 
@@ -909,7 +909,7 @@ async function getDailySeriesByPlugin(
   pluginIds: number[] | null,
   fromDate: Date,
   toDate: Date,
-  game = "rs3",
+  game = "runescape",
 ): Promise<Map<number, DailySeriesPoint[]>> {
   const pool = getPool();
   const { rows } = await pool.query(
@@ -1165,7 +1165,7 @@ async function getDailyTotalsAllPlugins(fromDate: Date, toDate: Date, game: stri
   return { totalsByDay, todayByDay };
 }
 
-export async function getStatsOverview(rangeDays: 30 | 90 | 365 = 90, game = "rs3"): Promise<StatsOverview> {
+export async function getStatsOverview(rangeDays: 30 | 90 | 365 = 90, game = "runescape"): Promise<StatsOverview> {
   const pool = getPool();
   const padDays = rangeDays + 6; // extra lookback so the 7-day average is warmed up by day one of the visible range
   const fromDate = daysAgoDate(padDays - 1);
