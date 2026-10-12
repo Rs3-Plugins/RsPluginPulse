@@ -26,6 +26,7 @@ DB_USER=rspluginpulse
 NODE_MAJOR=24
 API_PORT=3011
 PROXY_PORT=8090
+STATS_PORT=8091
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m!!  %s\033[0m\n' "$*"; }
@@ -45,6 +46,17 @@ if ! command -v node >/dev/null 2>&1 || [[ "$(node -v)" != v${NODE_MAJOR}.* ]]; 
   apt-get install -y -qq nodejs
 fi
 node -v
+
+# ---------------------------------------------------------------- goaccess
+# For the traffic dashboard configure.sh sets up. Likely already present
+# from the other app's bootstrap; installed here too so this script is
+# self-sufficient on a box that doesn't have it yet.
+log "GoAccess + htpasswd"
+if ! command -v goaccess >/dev/null 2>&1 || ! command -v htpasswd >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq goaccess apache2-utils
+fi
 
 # ---------------------------------------------------------------- service user
 log "Service user: $APP_USER"
@@ -146,6 +158,15 @@ Still to do by hand (each needs a secret only you have):
    packages/web). vercel.json already points it at
    https://api.rspluginpulse.com.
 
-Nothing new is listening publicly: nginx binds to 127.0.0.1:${PROXY_PORT} only,
-Postgres stays on localhost, and cloudflared dials out the same as before.
+Traffic dashboard (GoAccess), regenerated every few minutes. Reach it via:
+  a) SSH tunnel, no DNS needed:
+       ssh -L ${STATS_PORT}:127.0.0.1:${STATS_PORT} ${APP_USER}@<SERVER_IP>
+       open http://localhost:${STATS_PORT}
+  b) Or add a second public hostname to the tunnel, e.g.
+       stats.rspluginpulse.com -> http://127.0.0.1:${STATS_PORT}
+Password is in /srv/rspluginpulse/shared/stats_password (never sent to GitHub).
+
+Nothing new is listening publicly: nginx binds to 127.0.0.1:${PROXY_PORT} and
+:${STATS_PORT} only, Postgres stays on localhost, and cloudflared dials out
+the same as before.
 EOF
