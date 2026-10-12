@@ -9,10 +9,13 @@ export function jsonWithCors(data: unknown, init?: ResponseInit) {
   return NextResponse.json(data, { ...init, headers: { ...CORS_HEADERS, ...init?.headers } });
 }
 
-export function svgWithCors(svg: string, init?: ResponseInit) {
-  return new NextResponse(svg, {
+export function pngWithCors(png: Buffer, init?: ResponseInit) {
+  // Buffer's generic ArrayBufferLike parameter doesn't structurally match
+  // BodyInit's plain Uint8Array expectation in some @types/node versions;
+  // Buffer already *is* a Uint8Array at runtime, this just satisfies TS.
+  return new NextResponse(new Uint8Array(png), {
     ...init,
-    headers: { ...CORS_HEADERS, "Content-Type": "image/svg+xml; charset=utf-8", ...init?.headers },
+    headers: { ...CORS_HEADERS, "Content-Type": "image/png", ...init?.headers },
   });
 }
 

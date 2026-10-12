@@ -1,7 +1,7 @@
 import { getEmbedCard, type EmbedCardOptions, type EmbedCardType } from "@rspluginpulse/db";
 import { getCachedCard, setCachedCard } from "@/lib/cardCache";
-import { renderCardSvg } from "@/lib/cardSvg";
-import { jsonWithCors, OPTIONS as corsOptions, svgWithCors } from "@/lib/cors";
+import { renderCardPng } from "@/lib/cardSvg";
+import { jsonWithCors, OPTIONS as corsOptions, pngWithCors } from "@/lib/cors";
 
 export const OPTIONS = corsOptions;
 
@@ -60,12 +60,14 @@ function cacheKeyFor(type: EmbedCardType, entityId: number, options: EmbedCardOp
   ].join("-");
 }
 
-// Two shapes share this route: the long form /api/card/{type}/{key}.svg
+// Two shapes share this route: the long form /api/card/{type}/{key}.png
 // (with ?theme=&spark=&... query params) and the short form
-// /api/card/{id}.svg, which looks the same settings up from a short link
+// /api/card/{id}.png, which looks the same settings up from a short link
 // created via /api/embed/shorten. A catch-all avoids Next's "different
 // slug names at the same level" restriction that a [type]/[key] + [id]
-// split would hit.
+// split would hit. PNG, not SVG: Discord and most chat apps don't render
+// inline SVG in link previews. The .svg suffix still works (stripped the
+// same as .png) for anything that already linked the old extension.
 export async function GET(request: Request, { params }: { params: Promise<{ slug: string[] }> }) {
   const { slug } = await params;
   const { searchParams } = new URL(request.url);
@@ -79,7 +81,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
     if (rawType !== "plugin" && rawType !== "author") {
       return jsonWithCors({ error: { status: 400, message: "type must be one of: plugin, author" } }, { status: 400 });
     }
-    const id = Number(rawKey.replace(/\.svg$/i, ""));
+    const id = Number(rawKey.replace(/\.(svg|png)$/i, ""));
     if (!Number.isInteger(id)) {
       return jsonWithCors({ error: { status: 400, message: "key must be a plugin or author id" } }, { status: 400 });
     }
@@ -87,7 +89,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
     entityId = id;
     options = optionsFromSearchParams(searchParams, rawType);
   } else if (slug.length === 1) {
-    const shortId = slug[0].replace(/\.svg$/i, "");
+    const shortId = slug[0].replace(/\.(svg|png)$/i, "");
     const config = await getEmbedCard(shortId);
     if (!config) {
       return jsonWithCors({ error: { status: 404, message: `No embed card with id "${shortId}"` } }, { status: 404 });
@@ -102,14 +104,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
   const cacheKey = cacheKeyFor(type, entityId, options);
   const cached = await getCachedCard(cacheKey);
   if (cached) {
-    return svgWithCors(cached, { headers: { "Cache-Control": "public, max-age=3600" } });
+    return pngWithCors(cached, { headers: { "Cache-Control": "public, max-age=3600" } });
   }
 
-  const svg = await renderCardSvg(type, entityId, options);
-  if (!svg) {
+  const png = await renderCardPng(type, entityId, options);
+  if (!png) {
     return jsonWithCors({ error: { status: 404, message: `No ${type} with id ${entityId}` } }, { status: 404 });
   }
 
-  await setCachedCard(cacheKey, svg);
-  return svgWithCors(svg, { headers: { "Cache-Control": "public, max-age=3600" } });
+  await setCachedCard(cacheKey, png);
+  return pngWithCors(png, { headers: { "Cache-Control": "public, max-age=3600" } });
 }

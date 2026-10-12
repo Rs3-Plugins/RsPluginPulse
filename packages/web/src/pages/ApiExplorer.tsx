@@ -764,8 +764,8 @@ export function ApiExplorer() {
     eTextColor,
   ]);
 
-  const eLongImgUrl = eKey !== null ? `${API_BASE}/api/card/${eType}/${eKey}.svg?${new URLSearchParams(eOptionParams).toString()}` : null;
-  const eShortImgUrl = eShortId ? `${API_BASE}/api/card/${eShortId}.svg` : null;
+  const eLongImgUrl = eKey !== null ? `${API_BASE}/api/card/${eType}/${eKey}.png?${new URLSearchParams(eOptionParams).toString()}` : null;
+  const eShortImgUrl = eShortId ? `${API_BASE}/api/card/${eShortId}.png` : null;
   const ePageUrl =
     eType === "plugin" && ePluginId !== null
       ? `${window.location.origin}/plugin/${ePluginId}`

@@ -1,4 +1,5 @@
 import { getAuthorProfile, getPlugin, getPluginTrend, getTopPlugins, type EmbedCardOptions, type EmbedCardType, type PluginTrendPoint } from "@rspluginpulse/db";
+import sharp from "sharp";
 
 interface CardPalette {
   bg: string;
@@ -257,4 +258,14 @@ export async function renderCardSvg(type: EmbedCardType, entityId: number, optio
   ${sparkBlock}
   ${footerBlock}
 </svg>`;
+}
+
+// Discord (and most chat apps) don't render inline SVG in link
+// previews/embeds -- treats it as a generic file instead of an image -- so
+// cards ship as PNG. Rendered at 2x density so it stays crisp if a client
+// scales it up, same reasoning a @2x asset would get.
+export async function renderCardPng(type: EmbedCardType, entityId: number, options: EmbedCardOptions): Promise<Buffer | null> {
+  const svg = await renderCardSvg(type, entityId, options);
+  if (!svg) return null;
+  return sharp(Buffer.from(svg), { density: 144 }).png().toBuffer();
 }

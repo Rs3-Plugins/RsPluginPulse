@@ -15,24 +15,24 @@ function safeKey(key: string): string {
 const CACHE_DIR = process.env.CARD_CACHE_DIR ?? path.join(process.cwd(), ".cache", "cards");
 
 function localFilePath(key: string): string {
-  return path.join(CACHE_DIR, `${safeKey(key)}.svg`);
+  return path.join(CACHE_DIR, `${safeKey(key)}.png`);
 }
 
-async function getLocalCachedCard(key: string): Promise<string | null> {
+async function getLocalCachedCard(key: string): Promise<Buffer | null> {
   try {
     const file = localFilePath(key);
     const info = await stat(file);
     if (Date.now() - info.mtimeMs > TTL_MS) return null;
-    return await readFile(file, "utf8");
+    return await readFile(file);
   } catch {
     return null;
   }
 }
 
-async function setLocalCachedCard(key: string, svg: string): Promise<void> {
+async function setLocalCachedCard(key: string, png: Buffer): Promise<void> {
   try {
     await mkdir(CACHE_DIR, { recursive: true });
-    await writeFile(localFilePath(key), svg, "utf8");
+    await writeFile(localFilePath(key), png);
   } catch {
     // caching is best-effort; a write failure shouldn't break the response
   }
@@ -66,10 +66,10 @@ function getR2Client(): S3Client | null {
 
 function r2ObjectKey(key: string): string {
   const prefix = process.env.R2_PREFIX ?? "cards/";
-  return `${prefix}${safeKey(key)}.svg`;
+  return `${prefix}${safeKey(key)}.png`;
 }
 
-async function getR2CachedCard(client: S3Client, key: string): Promise<string | null> {
+async function getR2CachedCard(client: S3Client, key: string): Promise<Buffer | null> {
   const bucket = process.env.R2_BUCKET_NAME!;
   const objectKey = r2ObjectKey(key);
   try {
@@ -79,16 +79,16 @@ async function getR2CachedCard(client: S3Client, key: string): Promise<string | 
 
     const obj = await client.send(new GetObjectCommand({ Bucket: bucket, Key: objectKey }));
     if (!obj.Body) return null;
-    return await obj.Body.transformToString("utf-8");
+    return Buffer.from(await obj.Body.transformToByteArray());
   } catch {
     return null;
   }
 }
 
-async function setR2CachedCard(client: S3Client, key: string, svg: string): Promise<void> {
+async function setR2CachedCard(client: S3Client, key: string, png: Buffer): Promise<void> {
   const bucket = process.env.R2_BUCKET_NAME!;
   try {
-    await client.send(new PutObjectCommand({ Bucket: bucket, Key: r2ObjectKey(key), Body: svg, ContentType: "image/svg+xml" }));
+    await client.send(new PutObjectCommand({ Bucket: bucket, Key: r2ObjectKey(key), Body: png, ContentType: "image/png" }));
   } catch {
     // caching is best-effort; a write failure shouldn't break the response
   }
@@ -98,14 +98,14 @@ async function setR2CachedCard(client: S3Client, key: string, svg: string): Prom
 // Picks whichever store is configured: R2 when its env vars are present
 // (production, shared across every instance), otherwise the local
 // directory (local dev, single process).
-export async function getCachedCard(key: string): Promise<string | null> {
+export async function getCachedCard(key: string): Promise<Buffer | null> {
   const client = getR2Client();
   if (client) return getR2CachedCard(client, key);
   return getLocalCachedCard(key);
 }
 
-export async function setCachedCard(key: string, svg: string): Promise<void> {
+export async function setCachedCard(key: string, png: Buffer): Promise<void> {
   const client = getR2Client();
-  if (client) return setR2CachedCard(client, key, svg);
-  return setLocalCachedCard(key, svg);
+  if (client) return setR2CachedCard(client, key, png);
+  return setLocalCachedCard(key, png);
 }

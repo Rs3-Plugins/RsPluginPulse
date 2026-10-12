@@ -44,5 +44,5 @@ export async function GET(request: Request) {
   };
 
   const id = await createOrGetEmbedCard(type, entityId, options);
-  return jsonWithCors({ id, path: `/api/card/${id}.svg` });
+  return jsonWithCors({ id, path: `/api/card/${id}.png` });
 }
