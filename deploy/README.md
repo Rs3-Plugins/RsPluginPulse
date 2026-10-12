@@ -108,7 +108,7 @@ integration, independent of the Actions workflow above.
 
 ## How a deploy works
 
-Push to `main` (touching `packages/db`, `packages/api`, `packages/ingest`,
+Push to `production` (touching `packages/db`, `packages/api`, `packages/ingest`,
 or `deploy/`), then:
 
 1. CI installs, builds the API (`next build`)

@@ -1,8 +1,10 @@
 name: Deploy API
 
+# Only the production branch goes live -- same convention as the other app
+# on this box.
 on:
   push:
-    branches: [main]
+    branches: [production]
     paths:
       - 'packages/db/**'
       - 'packages/api/**'
