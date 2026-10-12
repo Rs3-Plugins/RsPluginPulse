@@ -184,6 +184,46 @@ restricted to the exact systemctl/nginx commands `release.sh` needs, and
 systemd hardening (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`,
 writable only under `/srv/rspluginpulse`).
 
+## Postgres tuning
+
+The app's workload is read/query-heavy, not write-heavy: the ingest timer
+does one batch insert every 4h, but the leaderboard, search, and stats
+pages run SELECT-only aggregation queries (window functions, per-plugin
+correlated subqueries) against a `plugin_snapshots` table that only grows.
+Postgres's defaults assume a much smaller, more balanced workload.
+
+**Not applied yet** -- this is a shared cluster (Group-Ironman-Backend runs
+on the same Postgres instance), so these need to be checked against the
+VPS's actual RAM and reviewed before touching a live, shared service.
+Recommended `postgresql.conf` changes, scaled to the box's real memory
+(the values below assume a small VPS with a few GB of RAM; scale
+`shared_buffers` to ~25% and `effective_cache_size` to ~50-75% of total
+RAM instead if it's larger):
+
+```conf
+shared_buffers = 256MB              # Postgres's own page cache
+effective_cache_size = 2GB          # planner hint: how much the OS also caches
+work_mem = 32MB                     # per-sort/hash-op memory for the GROUP BY/
+                                     # window-function queries the leaderboard runs
+random_page_cost = 1.1              # assumes SSD, not spinning disk (default: 4.0)
+effective_io_concurrency = 200      # SSD can handle concurrent reads (default: 1)
+default_statistics_target = 200     # better plans on the large plugin_snapshots table
+max_parallel_workers_per_gather = 4 # parallelize the big aggregation queries
+```
+
+`work_mem` is per sort/hash operation, not per connection -- a complex
+query can use several multiples of it, and it's shared across every
+connection on the cluster (including Group-Ironman-Backend's), so don't
+scale it up carelessly on a small box. After changing
+`default_statistics_target`, re-run `ANALYZE` on `plugins` and
+`plugin_snapshots` for it to take effect.
+
+The local dev Postgres (`packages/db/src/local-postgres.ts`) already runs
+with the same settings via `postgresFlags`, verified against the
+benchmark queries in this session (10-15% faster on the heaviest
+aggregation queries; the dataset is still small enough that the biggest
+win -- `shared_buffers`/`effective_cache_size` -- matters more as it grows).
+
 ## Checking on it
 
 ```bash

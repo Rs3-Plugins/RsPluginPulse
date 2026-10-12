@@ -24,6 +24,19 @@ async function main() {
     // WIN1252), which then rejects any non-Latin-1 character (emoji,
     // curly quotes, accented names, etc.) on insert.
     initdbFlags: ["--encoding=UTF8", "--locale=C"],
+    // Tuned for this app's actual shape: read/query-heavy (leaderboard,
+    // search, stats -- all SELECT) against a periodic batch-insert ingest
+    // every 4h, not a write-heavy OLTP workload. Mirrors the production
+    // recommendations in deploy/README.md's Postgres tuning section.
+    postgresFlags: [
+      "--shared_buffers=256MB",
+      "--effective_cache_size=2GB",
+      "--work_mem=32MB",
+      "--random_page_cost=1.1",
+      "--effective_io_concurrency=200",
+      "--default_statistics_target=200",
+      "--max_parallel_workers_per_gather=4",
+    ],
   });
 
   if (!existsSync(DATA_DIR)) {
