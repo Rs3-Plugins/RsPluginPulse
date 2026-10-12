@@ -19,7 +19,7 @@ export function LegalModal({ doc, onClose }: Props) {
         <div className="legal-dialog-header">
           <div>
             <h2>{TITLES[doc]}</h2>
-            <div className="legal-dialog-meta">rspluginpulse.com · Last updated Oct 11, 2026</div>
+            <div className="legal-dialog-meta">rspluginpulse.com · Last updated Oct 12, 2026</div>
           </div>
           <button className="legal-close" aria-label="Close" onClick={onClose}>
             ×
@@ -55,7 +55,7 @@ function CookiesBody() {
         </li>
       </ul>
       <h3>Third-party sites</h3>
-      <p>Links to mod.io and Discord take you to sites with their own cookie policies.</p>
+      <p>Links to mod.io, GitHub and Discord take you to sites with their own cookie policies.</p>
       <h3>Managing cookies</h3>
       <p>You can clear or block cookies and site storage in your browser settings. The site will still work, but your theme and filters won't be remembered.</p>
     </>
@@ -73,8 +73,8 @@ function PrivacyBody() {
       </ul>
       <h3>Public plugin data</h3>
       <p>
-        Plugin names, author names and download, install and subscriber counts are taken from public mod.io listings. If you're an
-        author and want your profile hidden from PluginPulse, contact us on Discord.
+        Plugin names, author names and download, install and subscriber counts are taken from public mod.io listings (RuneScape) and the
+        RuneLite plugin hub (RuneLite). If you're an author and want your profile hidden from PluginPulse, contact us on Discord.
       </p>
       <h3>Sharing</h3>
       <p>We don't sell or share personal data. Hosting and analytics providers process data only to run the site.</p>
@@ -95,11 +95,11 @@ function TermsBody() {
     <>
       <h3>About this site</h3>
       <p>
-        RuneScape PluginPulse is an independent fan project. It is not affiliated with, endorsed or sponsored by Jagex Ltd. or mod.io.
-        RuneScape and Jagex are trademarks of Jagex Ltd.
+        RuneScape PluginPulse is an independent fan project. It is not affiliated with, endorsed or sponsored by Jagex Ltd., mod.io,
+        or the RuneLite project. RuneScape and Jagex are trademarks of Jagex Ltd.
       </p>
       <h3>Data accuracy</h3>
-      <p>Statistics are collected from mod.io on a schedule and may be delayed, incomplete or wrong. The site is provided as is, without warranties of any kind.</p>
+      <p>Statistics are collected from mod.io and the RuneLite plugin hub on a schedule and may be delayed, incomplete or wrong. The site is provided as is, without warranties of any kind.</p>
       <h3>Acceptable use</h3>
       <ul>
         <li>Don't overload the site with automated requests or scraping.</li>

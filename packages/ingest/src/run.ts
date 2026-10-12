@@ -14,6 +14,6 @@ async function main() {
 
 main().catch(async (error) => {
   console.error(error);
-  await notifyIngestFailure("mod.io (RS3)", error);
+  await notifyIngestFailure("mod.io (RuneScape)", error);
   process.exit(1);
 });

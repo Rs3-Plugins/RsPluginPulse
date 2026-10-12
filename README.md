@@ -3,12 +3,14 @@
 Live at [rspluginpulse.com](https://rspluginpulse.com).
 
 Install/download leaderboards and trends for RuneScape's mod.io plugins
-(https://mod.io/g/runescape/m).
+(https://mod.io/g/runescape/m) and RuneLite's plugin hub.
 
-Data comes from mod.io's public, unauthenticated web endpoint
+RuneScape data comes from mod.io's public, unauthenticated web endpoint
 (`https://mod.io/v1/games/@runescape/mods` with header `x-modio-origin: web`) —
 the game's third-party API access is disabled, but this is the same endpoint
-mod.io's own site calls, so no API key is needed or possible.
+mod.io's own site calls, so no API key is needed or possible. RuneLite data
+comes from RuneLite's own official endpoints (`static.runelite.net`,
+`repo.runelite.net`, `api.runelite.net`) — see `packages/ingest/src/runelite.ts`.
 
 ## Packages
 
