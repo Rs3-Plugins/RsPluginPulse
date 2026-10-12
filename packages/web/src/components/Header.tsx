@@ -126,12 +126,17 @@ export function Header() {
 
           <HeaderSearch />
 
-          <button className="pp-ghost" onClick={handleRandomize} disabled={rolling} title="Open a random plugin">
-            <DiceIcon rolling={rolling} />
-            {rolling ? "Rolling…" : "Randomizer"}
-          </button>
-
           <GameSwitcher updatedLabel={updatedLabel} sourceLabel={dataSourceLabel(game)} />
+
+          <button
+            className="pp-ghost pp-ghost--icon"
+            onClick={handleRandomize}
+            disabled={rolling}
+            title="Open a random plugin"
+            aria-label="Open a random plugin"
+          >
+            <DiceIcon rolling={rolling} />
+          </button>
 
           <a
             className="pp-ghost pp-ghost--icon"
