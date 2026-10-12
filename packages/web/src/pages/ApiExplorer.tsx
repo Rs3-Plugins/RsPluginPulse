@@ -641,7 +641,7 @@ export function ApiExplorer() {
   const authorItems: PickerItem[] = (authorList ?? []).map((a) => ({
     id: a.authorId,
     name: a.authorName,
-    sub: `${a.pluginCount} plugin${a.pluginCount === 1 ? "" : "s"} · ${a.value.toLocaleString()} downloads`,
+    sub: `${a.pluginCount} plugin${a.pluginCount === 1 ? "" : "s"}`,
     avatarUrl: a.avatarUrl,
   }));
 
