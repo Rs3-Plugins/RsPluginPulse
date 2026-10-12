@@ -217,7 +217,6 @@ export function HeaderSearch() {
             pick(href);
           }}
         >
-          <Avatar name={p.author} url={p.authorAvatarUrl} variant={variant} />
           {variant === "desktop" ? (
             <span className="pp-search__label">
               <b>{highlight(p.name, query)}</b> <span className={subClass}>by {p.author}</span>
