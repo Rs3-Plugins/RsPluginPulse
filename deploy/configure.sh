@@ -27,16 +27,19 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # ---------------------------------------------------------------- nginx logging
-# Own log_format name (not the other app's) so the two stay independent.
-# real_ip matters: every request arrives from cloudflared on loopback, so
-# without this $remote_addr would be 127.0.0.1 for the entire internet.
-log "nginx log format + real_ip"
+# Own log_format name (not the other app's), since log_format itself is
+# fine to declare more than once as long as the names differ.
+#
+# real_ip_header/set_real_ip_from/real_ip_recursive are NOT redeclared here
+# -- those are singleton directives in the http{} context (every conf.d
+# file loads into the same one), and the other app's bootstrap already set
+# them so $remote_addr resolves correctly for every server block, not just
+# its own. Redeclaring them is a duplicate-directive config error. If this
+# is ever deployed on a box without that other app, add back:
+#   set_real_ip_from 127.0.0.1; set_real_ip_from ::1;
+#   real_ip_header CF-Connecting-IP; real_ip_recursive on;
+log "nginx log format"
 cat >/etc/nginx/conf.d/rspluginpulse-logformat.conf <<'EOF'
-set_real_ip_from 127.0.0.1;
-set_real_ip_from ::1;
-real_ip_header CF-Connecting-IP;
-real_ip_recursive on;
-
 log_format rspluginpulse '$remote_addr - $remote_user [$time_local] "$request" '
                '$status $body_bytes_sent "$http_referer" "$http_user_agent" '
                '$request_time';
