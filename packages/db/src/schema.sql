@@ -97,6 +97,20 @@ CREATE TABLE IF NOT EXISTS plugin_snapshots (
 CREATE INDEX IF NOT EXISTS plugin_snapshots_captured_at_idx
   ON plugin_snapshots (captured_at);
 
+-- Denormalized from plugins.game (populated on every insert -- see
+-- upsertPluginsAndSnapshot) purely so "latest snapshot for game X" can hit
+-- an index on this table directly. Without it, that query has to join the
+-- whole table against plugins to filter by game, which turns into a seq
+-- scan once plugin_snapshots passes a few hundred thousand rows -- it's
+-- well past a million now.
+ALTER TABLE plugin_snapshots ADD COLUMN IF NOT EXISTS game TEXT;
+
+UPDATE plugin_snapshots s SET game = p.game
+  FROM plugins p WHERE p.id = s.plugin_id AND s.game IS NULL;
+
+CREATE INDEX IF NOT EXISTS plugin_snapshots_game_captured_idx
+  ON plugin_snapshots (game, captured_at DESC);
+
 CREATE INDEX IF NOT EXISTS plugin_snapshots_plugin_captured_idx
   ON plugin_snapshots (plugin_id, captured_at DESC);
 
