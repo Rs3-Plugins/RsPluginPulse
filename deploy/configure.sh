@@ -164,6 +164,11 @@ fi
 
 # nginx logs are root:adm 640; read them via the adm group rather than as root.
 usermod -aG adm "$APP_USER"
+# So `journalctl -u rspluginpulse-ingest` works for this user without sudo
+# (e.g. over SSH from the run-ingest.yml workflow) -- systemd's own
+# per-process ACLs would likely cover this already since the unit runs as
+# this same user, but group membership makes it certain either way.
+usermod -aG systemd-journal "$APP_USER"
 
 echo "$STATS_THEME" >"$APP_ROOT/goaccess/theme"
 chown "$APP_USER:$APP_USER" "$APP_ROOT/goaccess/theme"

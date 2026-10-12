@@ -1,0 +1,68 @@
+name: Run Ingest
+
+# Manual-only: run from the Actions tab (Run workflow) whenever you want a
+# fresh mod.io/RuneLite snapshot before the 4h timer on the server fires on
+# its own. Doesn't build or ship anything -- just tells the server to run
+# whatever ingest code is already deployed there.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: run-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          echo "scanning $SSH_HOST port $SSH_PORT ..."
+          ssh-keyscan -T 10 -p "$SSH_PORT" "$SSH_HOST" > /tmp/scanned 2>/tmp/scanerr || true
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          elif [ -s /tmp/scanned ]; then
+            echo "::warning::SSH_KNOWN_HOSTS not set — trusting the key seen now"
+            cp /tmp/scanned ~/.ssh/known_hosts
+          else
+            echo "::error::could not reach $SSH_HOST:$SSH_PORT to read its host key"
+            exit 1
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      # systemctl restart on a Type=oneshot unit blocks until it finishes
+      # (that's what "oneshot" means to systemd), so this step doesn't
+      # return until both mod.io and RuneLite ingest have actually run.
+      # `systemctl restart`'s own exit code only reflects whether the job
+      # was *queued* successfully, not whether the ingest scripts
+      # themselves succeeded -- is-failed afterwards checks that properly.
+      - name: Run ingest on the server
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
+        run: |
+          set -euo pipefail
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" bash -s <<'EOF'
+            set -uo pipefail
+            sudo systemctl restart rspluginpulse-ingest
+            echo "--- last 60 log lines ---"
+            journalctl -u rspluginpulse-ingest -n 60 --no-pager
+            if systemctl is-failed --quiet rspluginpulse-ingest; then
+              echo "::error::ingest unit reported failure -- see the log above"
+              exit 1
+            fi
+            echo "ingest completed successfully"
+          EOF
