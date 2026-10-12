@@ -22,12 +22,14 @@ export interface SearchPluginRow {
   id: number;
   name: string;
   author: string;
+  authorAvatarUrl: string | null;
   total: number;
 }
 
 export interface SearchAuthorRow {
   id: number;
   name: string;
+  avatarUrl: string | null;
   pluginCount: number;
   total: number;
 }

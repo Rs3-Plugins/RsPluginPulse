@@ -454,6 +454,8 @@ export async function searchPluginsAndAuthors(
   authorLimit = 4,
 ): Promise<SearchResult> {
   const q = query.trim();
+  const pool = getPool();
+
   if (!q) {
     // Trending counts are fixed regardless of the caller's limit -- the
     // header search always shows "top 5 plugins + top 3 authors" when idle.
@@ -461,13 +463,28 @@ export async function searchPluginsAndAuthors(
       getTopPlugins("weekly", 5, game),
       getTopAuthors("weekly", 3, game),
     ]);
+    const [pluginAvatars, authorAvatars] = await Promise.all([
+      getPluginAvatars(pool, plugins.map((p) => p.id)),
+      getAuthorAvatars(pool, authors.map((a) => a.authorId)),
+    ]);
     return {
-      plugins: plugins.map((p) => ({ id: p.id, name: p.name, author: p.authorName, total: p.value })),
-      authors: authors.map((a) => ({ id: a.authorId, name: a.authorName, pluginCount: a.pluginCount, total: a.value })),
+      plugins: plugins.map((p) => ({
+        id: p.id,
+        name: p.name,
+        author: p.authorName,
+        authorAvatarUrl: pluginAvatars.get(p.id) ?? null,
+        total: p.value,
+      })),
+      authors: authors.map((a) => ({
+        id: a.authorId,
+        name: a.authorName,
+        avatarUrl: authorAvatars.get(a.authorId) ?? null,
+        pluginCount: a.pluginCount,
+        total: a.value,
+      })),
     };
   }
 
-  const pool = getPool();
   const wordBoundary = `\\m${escapeRegExp(q)}`;
 
   const pluginsResult = await pool.query(
@@ -476,7 +493,7 @@ export async function searchPluginsAndAuthors(
        FROM plugin_snapshots s
        ORDER BY s.plugin_id, s.captured_at DESC
      )
-     SELECT p.id, p.name, p.author_name, l.downloads_total AS total,
+     SELECT p.id, p.name, p.author_name, p.author_avatar_url, l.downloads_total AS total,
        CASE
          WHEN p.name ILIKE $1 || '%' THEN 1
          WHEN p.name ~* $2 THEN 2
@@ -505,7 +522,7 @@ export async function searchPluginsAndAuthors(
        ORDER BY s.plugin_id, s.captured_at DESC
      ),
      agg AS (
-       SELECT pa.author_id, MAX(pa.author_name) AS author_name,
+       SELECT pa.author_id, MAX(pa.author_name) AS author_name, MAX(pa.author_avatar_url) AS author_avatar_url,
               COUNT(DISTINCT pa.plugin_id) AS plugin_count, SUM(l.downloads_total) AS total
        FROM plugin_authors pa
        JOIN plugins p ON p.id = pa.plugin_id
@@ -513,7 +530,7 @@ export async function searchPluginsAndAuthors(
        WHERE p.game = $3 AND NOT ($4 = ANY(p.tags))
        GROUP BY pa.author_id
      )
-     SELECT author_id, author_name, plugin_count, total,
+     SELECT author_id, author_name, author_avatar_url, plugin_count, total,
        CASE
          WHEN author_name ILIKE $1 || '%' THEN 1
          WHEN author_name ~* $2 THEN 2
@@ -531,15 +548,32 @@ export async function searchPluginsAndAuthors(
       id: row.id,
       name: row.name,
       author: row.author_name,
+      authorAvatarUrl: row.author_avatar_url,
       total: Number(row.total),
     })),
     authors: authorsResult.rows.map((row) => ({
       id: row.author_id,
       name: row.author_name,
+      avatarUrl: row.author_avatar_url,
       pluginCount: Number(row.plugin_count),
       total: Number(row.total),
     })),
   };
+}
+
+async function getPluginAvatars(pool: ReturnType<typeof getPool>, ids: number[]): Promise<Map<number, string | null>> {
+  if (ids.length === 0) return new Map();
+  const { rows } = await pool.query(`SELECT id, author_avatar_url FROM plugins WHERE id = ANY($1)`, [ids]);
+  return new Map(rows.map((row) => [row.id, row.author_avatar_url]));
+}
+
+async function getAuthorAvatars(pool: ReturnType<typeof getPool>, ids: number[]): Promise<Map<number, string | null>> {
+  if (ids.length === 0) return new Map();
+  const { rows } = await pool.query(
+    `SELECT author_id, MAX(author_avatar_url) AS author_avatar_url FROM plugin_authors WHERE author_id = ANY($1) GROUP BY author_id`,
+    [ids],
+  );
+  return new Map(rows.map((row) => [row.author_id, row.author_avatar_url]));
 }
 
 export interface PluginMeta {

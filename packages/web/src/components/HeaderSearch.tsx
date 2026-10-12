@@ -12,6 +12,21 @@ function formatCompact(n: number): string {
   return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(n);
 }
 
+function initials(name: string): string {
+  return name.slice(0, 2).toUpperCase();
+}
+
+function Avatar({ name, url, variant }: { name: string; url: string | null; variant: "desktop" | "palette" }) {
+  const wrapClass = variant === "desktop" ? "pp-search__avatar" : "pp-palette__avatar";
+  const imgClass = variant === "desktop" ? "pp-search__avatar-img" : "pp-palette__avatar-img";
+  const fallbackClass = variant === "desktop" ? "pp-search__avatar-fallback" : "pp-palette__avatar-fallback";
+  return (
+    <span className={wrapClass}>
+      {url ? <img src={url} alt="" referrerPolicy="no-referrer" className={imgClass} /> : <span className={fallbackClass}>{initials(name)}</span>}
+    </span>
+  );
+}
+
 // Wraps the first case-insensitive occurrence of `query` inside `name` in
 // <mark>, per the spec's "wrap the matched substring" instruction.
 function highlight(name: string, query: string): ReactNode {
@@ -202,6 +217,7 @@ export function HeaderSearch() {
             pick(href);
           }}
         >
+          <Avatar name={p.author} url={p.authorAvatarUrl} variant={variant} />
           {variant === "desktop" ? (
             <span className="pp-search__label">
               <b>{highlight(p.name, query)}</b> <span className={subClass}>by {p.author}</span>
@@ -234,6 +250,7 @@ export function HeaderSearch() {
             pick(href);
           }}
         >
+          <Avatar name={a.name} url={a.avatarUrl} variant={variant} />
           {variant === "desktop" ? (
             <span className="pp-search__label">
               <b>{highlight(a.name, query)}</b>{" "}
