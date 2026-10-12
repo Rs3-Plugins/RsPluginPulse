@@ -18,6 +18,25 @@ export interface AuthorLeaderboardRow {
   value: number;
 }
 
+export interface SearchPluginRow {
+  id: number;
+  name: string;
+  author: string;
+  total: number;
+}
+
+export interface SearchAuthorRow {
+  id: number;
+  name: string;
+  pluginCount: number;
+  total: number;
+}
+
+export interface SearchResult {
+  plugins: SearchPluginRow[];
+  authors: SearchAuthorRow[];
+}
+
 export interface NewestPluginRow {
   id: number;
   nameId: string;

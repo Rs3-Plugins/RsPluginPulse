@@ -181,6 +181,17 @@ const ENDPOINTS: EndpointDef[] = [
     queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's ingest to check." }],
   },
   {
+    key: "search",
+    path: "/api/search",
+    title: "Search",
+    desc: "Plugins and authors matching a query, ranked by name match quality then total downloads. An empty query returns the top 5 plugins and top 3 authors by weekly gain (\"trending\") — this is what the header search box uses.",
+    queryParams: [
+      { name: "q", type: "string", placeholder: "e.g. xp", desc: "Search text. Empty returns trending plugins/authors instead." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's catalog to search." },
+      { name: "limit", type: "int", default: "6", desc: "Max plugin rows to return (authors scale down proportionally), max 20." },
+    ],
+  },
+  {
     key: "leaderboard-plugins",
     path: "/api/leaderboard/plugins",
     title: "Plugin leaderboard",

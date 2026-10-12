@@ -22,6 +22,7 @@ import type {
   Period,
   PluginLeaderboardRow,
   PluginTrendPoint,
+  SearchResult,
   SiteStats,
   StatsOverview,
 } from "./types";
@@ -435,6 +436,110 @@ export async function getTopAuthors(period: Period, limit = 50, game = "rs3"): P
   return Array.from(byAuthor.values())
     .sort((a, b) => b.value - a.value)
     .slice(0, limit);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Trending fallback for an empty query, plus a 4-tier plugin / 3-tier
+// author ranking (name-starts-with > word-starts-with > name-contains >
+// author-name-contains) for a real one, tie-broken by total downloads.
+// Authors are aggregated via plugin_authors so a co-author's search hit
+// counts every plugin they're credited on, not just plugins.author_id.
+export async function searchPluginsAndAuthors(
+  game: string,
+  query: string,
+  pluginLimit = 6,
+  authorLimit = 4,
+): Promise<SearchResult> {
+  const q = query.trim();
+  if (!q) {
+    // Trending counts are fixed regardless of the caller's limit -- the
+    // header search always shows "top 5 plugins + top 3 authors" when idle.
+    const [plugins, authors] = await Promise.all([
+      getTopPlugins("weekly", 5, game),
+      getTopAuthors("weekly", 3, game),
+    ]);
+    return {
+      plugins: plugins.map((p) => ({ id: p.id, name: p.name, author: p.authorName, total: p.value })),
+      authors: authors.map((a) => ({ id: a.authorId, name: a.authorName, pluginCount: a.pluginCount, total: a.value })),
+    };
+  }
+
+  const pool = getPool();
+  const wordBoundary = `\\m${escapeRegExp(q)}`;
+
+  const pluginsResult = await pool.query(
+    `WITH latest AS (
+       SELECT DISTINCT ON (s.plugin_id) s.plugin_id, s.downloads_total
+       FROM plugin_snapshots s
+       ORDER BY s.plugin_id, s.captured_at DESC
+     )
+     SELECT p.id, p.name, p.author_name, l.downloads_total AS total,
+       CASE
+         WHEN p.name ILIKE $1 || '%' THEN 1
+         WHEN p.name ~* $2 THEN 2
+         WHEN p.name ILIKE '%' || $1 || '%' THEN 3
+         ELSE 4
+       END AS tier
+     FROM plugins p
+     JOIN latest l ON l.plugin_id = p.id
+     WHERE p.game = $3
+       AND NOT ($4 = ANY(p.tags))
+       AND (
+         p.name ILIKE '%' || $1 || '%'
+         OR EXISTS (
+           SELECT 1 FROM plugin_authors pa WHERE pa.plugin_id = p.id AND pa.author_name ILIKE '%' || $1 || '%'
+         )
+       )
+     ORDER BY tier ASC, total DESC
+     LIMIT $5`,
+    [q, wordBoundary, game, LEADERBOARD_EXCLUDED_TAG, pluginLimit],
+  );
+
+  const authorsResult = await pool.query(
+    `WITH latest AS (
+       SELECT DISTINCT ON (s.plugin_id) s.plugin_id, s.downloads_total
+       FROM plugin_snapshots s
+       ORDER BY s.plugin_id, s.captured_at DESC
+     ),
+     agg AS (
+       SELECT pa.author_id, MAX(pa.author_name) AS author_name,
+              COUNT(DISTINCT pa.plugin_id) AS plugin_count, SUM(l.downloads_total) AS total
+       FROM plugin_authors pa
+       JOIN plugins p ON p.id = pa.plugin_id
+       JOIN latest l ON l.plugin_id = p.id
+       WHERE p.game = $3 AND NOT ($4 = ANY(p.tags))
+       GROUP BY pa.author_id
+     )
+     SELECT author_id, author_name, plugin_count, total,
+       CASE
+         WHEN author_name ILIKE $1 || '%' THEN 1
+         WHEN author_name ~* $2 THEN 2
+         ELSE 3
+       END AS tier
+     FROM agg
+     WHERE author_name ILIKE '%' || $1 || '%'
+     ORDER BY tier ASC, total DESC
+     LIMIT $5`,
+    [q, wordBoundary, game, LEADERBOARD_EXCLUDED_TAG, authorLimit],
+  );
+
+  return {
+    plugins: pluginsResult.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      author: row.author_name,
+      total: Number(row.total),
+    })),
+    authors: authorsResult.rows.map((row) => ({
+      id: row.author_id,
+      name: row.author_name,
+      pluginCount: Number(row.plugin_count),
+      total: Number(row.total),
+    })),
+  };
 }
 
 export interface PluginMeta {
