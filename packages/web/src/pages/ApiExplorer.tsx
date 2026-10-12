@@ -642,6 +642,7 @@ export function ApiExplorer() {
     id: a.authorId,
     name: a.authorName,
     sub: `${a.pluginCount} plugin${a.pluginCount === 1 ? "" : "s"} · ${a.value.toLocaleString()} downloads`,
+    avatarUrl: a.avatarUrl,
   }));
 
   const bKey = bType === "plugin" ? bPluginId : bAuthorId;

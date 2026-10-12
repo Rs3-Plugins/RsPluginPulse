@@ -522,19 +522,6 @@ body {
   align-items: center;
 }
 
-/* SearchBox is reused outside the header too (the API explorer's picker),
-   where its dropdown only needs to clear its own local siblings. The
-   header's elevated z-index -- competing against the whole rest of the
-   page, since .site-header itself doesn't isolate a stacking context --
-   is scoped to this modifier instead of the shared base class, so it
-   doesn't fight other same-tier page content (this exact bug: a
-   mid-page SearchBox and the header's shared z-index:41, tied, with the
-   later-painted one in the DOM winning and showing through the header's
-   dropdown). */
-.pp-search--header {
-  z-index: 41;
-}
-
 .pp-search__icon {
   position: absolute;
   left: 12px;
@@ -596,35 +583,18 @@ body {
   color: var(--text);
 }
 
+/* Positioned via inline top/left/width (see SearchBox.tsx) and portaled
+   to <body>, not a CSS position:absolute child of .pp-search -- so it
+   isn't clipped by an ancestor with overflow:hidden (e.g. a rounded-
+   corner .card), and doesn't need to fight page content on z-index. */
 .pp-search__dd {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  width: 340px;
+  position: fixed;
+  z-index: 200;
   background: var(--raise);
   border: 1px solid var(--line2);
   border-radius: 8px;
   box-shadow: var(--shadow);
   overflow: hidden;
-}
-
-.pp-search__dd-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--line);
-}
-
-.pp-search__dd-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.pp-search__dd-hint {
-  font-size: 11px;
-  color: var(--dim);
 }
 
 .pp-search__dd-body {
@@ -3827,18 +3797,12 @@ a:hover {
 }
 
 /* Plugin/author combobox picker -- a SearchBox instance, just widened to
-   fill its narrow sidebar field and left-anchored (instead of the header's
-   fixed 340px/right-anchored dropdown, which would overhang this field's
-   container on the right). */
+   fill its narrow sidebar field. Its dropdown's anchor/width is set via
+   props (dropdownAnchor="left", dropdownMinWidth) since it's portaled to
+   <body> and can't be reached by a descendant selector anymore. */
 
 .picker-search-box.pp-search {
   width: 100%;
-}
-
-.picker-search-box .pp-search__dd {
-  left: 0;
-  right: auto;
-  width: max(280px, 100%);
 }
 
 /* Badge builder */

@@ -6,6 +6,7 @@ export interface PluginLeaderboardRow {
   name: string;
   authorId: number;
   authorName: string;
+  authorAvatarUrl: string | null;
   profileUrl: string;
   tags: string[];
   value: number;
@@ -14,6 +15,7 @@ export interface PluginLeaderboardRow {
 export interface AuthorLeaderboardRow {
   authorId: number;
   authorName: string;
+  avatarUrl: string | null;
   pluginCount: number;
   value: number;
 }

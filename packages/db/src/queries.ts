@@ -314,7 +314,7 @@ const LEADERBOARD_EXCLUDED_TAG = "Library for other Plugins";
 async function topPluginsByLatestMetric(metric: "downloads_total" | "downloads_today", game: string, limit: number): Promise<PluginLeaderboardRow[]> {
   const pool = getPool();
   const { rows } = await pool.query(
-    `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.profile_url, p.tags, l.${metric} AS value
+    `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.author_avatar_url, p.profile_url, p.tags, l.${metric} AS value
      FROM plugins p
      JOIN LATERAL (
        SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
@@ -333,7 +333,7 @@ async function topPluginsByLatestMetric(metric: "downloads_total" | "downloads_t
 async function topPluginsByGain(cutoffDays: number, game: string, limit: number): Promise<PluginLeaderboardRow[]> {
   const pool = getPool();
   const { rows } = await pool.query(
-    `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.profile_url, p.tags,
+    `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.author_avatar_url, p.profile_url, p.tags,
             l.downloads_total - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total) AS value
      FROM plugins p
      JOIN LATERAL (
@@ -428,6 +428,7 @@ export async function getTopAuthors(period: Period, limit = 50, game = "rs3"): P
       byAuthor.set(plugin.authorId, {
         authorId: plugin.authorId,
         authorName: plugin.authorName,
+        avatarUrl: plugin.authorAvatarUrl,
         pluginCount: 1,
         value: plugin.value,
       });
@@ -459,22 +460,18 @@ export async function searchPluginsAndAuthors(
       getTopPlugins("weekly", 5, game),
       getTopAuthors("weekly", 3, game),
     ]);
-    const [pluginAvatars, authorAvatars] = await Promise.all([
-      getPluginAvatars(pool, plugins.map((p) => p.id)),
-      getAuthorAvatars(pool, authors.map((a) => a.authorId)),
-    ]);
     return {
       plugins: plugins.map((p) => ({
         id: p.id,
         name: p.name,
         author: p.authorName,
-        authorAvatarUrl: pluginAvatars.get(p.id) ?? null,
+        authorAvatarUrl: p.authorAvatarUrl,
         total: p.value,
       })),
       authors: authors.map((a) => ({
         id: a.authorId,
         name: a.authorName,
-        avatarUrl: authorAvatars.get(a.authorId) ?? null,
+        avatarUrl: a.avatarUrl,
         pluginCount: a.pluginCount,
         total: a.value,
       })),
@@ -548,20 +545,6 @@ export async function searchPluginsAndAuthors(
   };
 }
 
-async function getPluginAvatars(pool: ReturnType<typeof getPool>, ids: number[]): Promise<Map<number, string | null>> {
-  if (ids.length === 0) return new Map();
-  const { rows } = await pool.query(`SELECT id, author_avatar_url FROM plugins WHERE id = ANY($1)`, [ids]);
-  return new Map(rows.map((row) => [row.id, row.author_avatar_url]));
-}
-
-async function getAuthorAvatars(pool: ReturnType<typeof getPool>, ids: number[]): Promise<Map<number, string | null>> {
-  if (ids.length === 0) return new Map();
-  const { rows } = await pool.query(
-    `SELECT author_id, MAX(author_avatar_url) AS author_avatar_url FROM plugin_authors WHERE author_id = ANY($1) GROUP BY author_id`,
-    [ids],
-  );
-  return new Map(rows.map((row) => [row.author_id, row.author_avatar_url]));
-}
 
 export interface PluginMeta {
   id: number;
@@ -657,6 +640,7 @@ function toPluginRow(row: any): PluginLeaderboardRow {
     name: row.name,
     authorId: row.author_id,
     authorName: row.author_name,
+    authorAvatarUrl: row.author_avatar_url,
     profileUrl: row.profile_url,
     tags: row.tags ?? [],
     value: Number(row.value),

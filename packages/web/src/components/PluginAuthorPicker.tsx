@@ -9,6 +9,9 @@ export interface PickerItem {
   // builders) ignore this. A navigational search needs to know which kind
   // of page to go to, which onChange's second argument carries.
   kind?: string;
+  // Omit entirely for no avatar slot at all (plugin items); pass null when
+  // the entity just doesn't have one set (author items with no avatar).
+  avatarUrl?: string | null;
 }
 
 interface Props {
@@ -39,7 +42,13 @@ export function PluginAuthorPicker({ items, value, onChange, placeholder, loadin
   const groups: SearchBoxGroup[] = [
     {
       label: `${filtered.length} result${filtered.length === 1 ? "" : "s"}`,
-      items: filtered.map((i) => ({ id: i.id, name: i.name, sub: i.sub, value: i.id === value ? "✓" : undefined })),
+      items: filtered.map((i) => ({
+        id: i.id,
+        name: i.name,
+        sub: i.sub,
+        value: i.id === value ? "✓" : undefined,
+        avatarUrl: i.avatarUrl,
+      })),
     },
   ];
 
@@ -71,6 +80,8 @@ export function PluginAuthorPicker({ items, value, onChange, placeholder, loadin
       onOpenChange={handleOpenChange}
       placeholder={loading ? "Loading…" : placeholder}
       emptyMessage="No matches."
+      dropdownAnchor="left"
+      dropdownMinWidth={280}
     />
   );
 }

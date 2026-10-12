@@ -1,5 +1,6 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 export interface SearchBoxItem {
   id: number;
@@ -37,6 +38,17 @@ interface SearchBoxProps {
   emptyMessage?: string;
   className?: string;
   onOpenChange?: (open: boolean) => void;
+  // Which edge of the input the dropdown's edge lines up with, and how
+  // wide it is at minimum (it still widens to match the input if that's
+  // wider). Defaults match the header's own search; the API explorer's
+  // narrower picker overrides both to fit its sidebar field instead.
+  dropdownAnchor?: "left" | "right";
+  dropdownMinWidth?: number;
+  // Total rows shown across all groups combined, in group order -- a
+  // safety cap so a caller passing a big unfiltered list (the API
+  // explorer's picker with an empty query) doesn't render thousands of
+  // DOM rows into a 380px-tall scroll box.
+  maxResults?: number;
 }
 
 export function initials(name: string): string {
@@ -86,12 +98,26 @@ function SearchIcon({ size, className }: { size: number; className?: string }) {
 // the leaderboard's table filter, and the API explorer's plugin/author
 // picker all share this instead of each rolling their own list markup.
 export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function SearchBox(
-  { query, onQueryChange, groups, onPick, placeholder, loading, emptyMessage, className, onOpenChange },
+  {
+    query,
+    onQueryChange,
+    groups,
+    onPick,
+    placeholder,
+    loading,
+    emptyMessage,
+    className,
+    onOpenChange,
+    dropdownAnchor = "right",
+    dropdownMinWidth = 340,
+    maxResults = 30,
+  },
   forwardedRef,
 ) {
   const suggest = groups !== undefined;
   const [open, setOpenState] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const innerInputRef = useRef<HTMLInputElement>(null);
   useImperativeHandle(forwardedRef, () => innerInputRef.current as HTMLInputElement);
@@ -101,7 +127,19 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
     onOpenChange?.(next);
   }
 
-  const flatItems = useMemo(() => (groups ?? []).flatMap((g) => g.items.map((item) => ({ item, group: g }))), [groups]);
+  const cappedGroups = useMemo(() => {
+    let remaining = maxResults;
+    const capped: SearchBoxGroup[] = [];
+    for (const g of groups ?? []) {
+      if (remaining <= 0) break;
+      const items = g.items.slice(0, remaining);
+      remaining -= items.length;
+      if (items.length > 0) capped.push({ ...g, items });
+    }
+    return capped;
+  }, [groups, maxResults]);
+
+  const flatItems = useMemo(() => cappedGroups.flatMap((g) => g.items.map((item) => ({ item, group: g }))), [cappedGroups]);
   const hasItems = flatItems.length > 0;
 
   useEffect(() => {
@@ -117,6 +155,30 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
     return () => document.removeEventListener("mousedown", onOutside);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggest, open]);
+
+  // Positioned via a portal to <body> and measured coordinates rather than
+  // CSS position:absolute, so the dropdown isn't clipped by an ancestor
+  // with overflow:hidden (e.g. the API explorer's rounded-corner .card) --
+  // it's no longer a DOM descendant of whatever would've clipped it.
+  useLayoutEffect(() => {
+    if (!suggest || !open || !rootRef.current) {
+      setRect(null);
+      return;
+    }
+    function measure() {
+      const box = rootRef.current!.getBoundingClientRect();
+      const width = Math.max(dropdownMinWidth, box.width);
+      const left = dropdownAnchor === "left" ? box.left : box.right - width;
+      setRect({ top: box.bottom + 8, left, width });
+    }
+    measure();
+    window.addEventListener("scroll", measure, true);
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("resize", measure);
+    };
+  }, [suggest, open, dropdownAnchor, dropdownMinWidth]);
 
   function pick(entry: { item: SearchBoxItem; group: SearchBoxGroup }) {
     onPick?.(entry.item, entry.group);
@@ -175,12 +237,12 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
         </button>
       )}
 
-      {suggest && open && (
-        <div className="pp-search__dd" role="listbox" aria-label="Search results">
+      {suggest && open && rect && createPortal(
+        <div className="pp-search__dd" style={{ top: rect.top, left: rect.left, width: rect.width }} role="listbox" aria-label="Search results">
           <div className="pp-search__dd-body">
             {loading && <div className="pp-search__empty">Loading…</div>}
             {!loading &&
-              (groups ?? []).map((group, groupIndex) => {
+              cappedGroups.map((group, groupIndex) => {
                 if (group.items.length === 0) return null;
                 return (
                   <div key={group.label}>
@@ -231,7 +293,8 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
               })}
             {!loading && !hasItems && <div className="pp-search__empty">{emptyMessage ?? "No results."}</div>}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

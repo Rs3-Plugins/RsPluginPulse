@@ -576,6 +576,7 @@ function aggregateAuthors(plugins: PluginLeaderboardRow[]): AuthorLeaderboardRow
       byAuthor.set(plugin.authorId, {
         authorId: plugin.authorId,
         authorName: plugin.authorName,
+        avatarUrl: plugin.authorAvatarUrl,
         pluginCount: 1,
         value: plugin.value,
       });
