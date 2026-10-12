@@ -84,6 +84,11 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/packages/api
 EnvironmentFile=${APP_ROOT}/shared/.env
 Environment=NODE_ENV=production
+# Outside packages/api/ on purpose: that whole directory lives under
+# current/, a symlink release.sh repoints to a fresh release on every
+# deploy (with old releases later pruned) -- a cache dir in there would be
+# wiped every time instead of surviving across deploys.
+Environment=CARD_CACHE_DIR=${APP_ROOT}/shared/cache/cards
 ExecStart=/usr/bin/npx next start -p ${API_PORT}
 Restart=always
 RestartSec=2

@@ -23,6 +23,11 @@ concurrency:
 
 jobs:
   deploy:
+    # The push trigger above already restricts to production, but
+    # workflow_dispatch (the manual "Run workflow" button) can target any
+    # branch -- this guards that path too, so there's no way to ship
+    # anything other than production from this workflow.
+    if: github.ref == 'refs/heads/production'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

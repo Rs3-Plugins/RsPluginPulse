@@ -69,7 +69,7 @@ touch "$APP_ROOT/.ssh/authorized_keys"
 chown -R "$APP_USER:$APP_USER" "$APP_ROOT/.ssh"
 chmod 700 "$APP_ROOT/.ssh"
 chmod 600 "$APP_ROOT/.ssh/authorized_keys"
-mkdir -p "$APP_ROOT"/{releases,shared}
+mkdir -p "$APP_ROOT"/{releases,shared,shared/cache/cards}
 chown -R "$APP_USER:$APP_USER" "$APP_ROOT"
 chmod 751 "$APP_ROOT"
 chmod 700 "$APP_ROOT/shared"

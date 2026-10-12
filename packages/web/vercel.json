@@ -6,6 +6,7 @@
       "VITE_API_BASE_URL": "https://api.rspluginpulse.com"
     }
   },
+  "ignoreCommand": "if [ \"${VERCEL_ENV:-production}\" = \"production\" ]; then exit 1; else exit 0; fi",
   "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }],
   "headers": [
     {

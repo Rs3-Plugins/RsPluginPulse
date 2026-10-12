@@ -145,6 +145,19 @@ If either ingest throws, it posts to `DISCORD_WEBHOOK_URL` itself (see
 `packages/ingest/src/discordNotify.ts`) — the timer doesn't need its own
 alerting on top of that.
 
+## Embed card cache
+
+Rendered SVG cards (`/api/card/...`) are cached to disk by default
+(`packages/api/src/lib/cardCache.ts`), falling back to R2 only if the five
+`R2_*` secrets are set. `configure.sh` points `CARD_CACHE_DIR` at
+`/srv/rspluginpulse/shared/cache/cards` — **not** the default
+`packages/api/.cache/cards`, which lives under `current/`, the symlink
+`release.sh` repoints to a new release on every deploy. Using the default
+would silently empty the cache (and cost a re-render per card) on every
+deploy; `shared/` persists across all of them. R2 isn't needed here unless
+this ever runs on more than one API instance at once, sharing one cache —
+it doesn't today.
+
 ## Rollback
 
 Releases are kept, so roll back by re-running against an older one:
