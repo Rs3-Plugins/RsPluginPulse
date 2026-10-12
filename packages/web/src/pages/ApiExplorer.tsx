@@ -291,7 +291,13 @@ const ENDPOINTS: EndpointDef[] = [
     desc: "shields.io endpoint-badge JSON. Point img.shields.io/endpoint?url= at this URL to get a badge that updates itself — this is what the Badge builder tab uses.",
     pathParams: [
       { name: "type", type: "enum", options: ["plugin", "author"], default: "plugin", required: true, desc: "plugin or author." },
-      { name: "key", type: "int", required: true, desc: "Plugin or author id, matching type above. Search by name below.", pickerKindFrom: "type" },
+      {
+        name: "key",
+        type: "int",
+        required: true,
+        desc: "Plugin or author id or name slug, matching type above. Search by name below.",
+        pickerKindFrom: "type",
+      },
       {
         name: "metric",
         type: "enum",
@@ -301,7 +307,18 @@ const ENDPOINTS: EndpointDef[] = [
         desc: "Value on the badge. subscribers/month are plugin-only, plugins is author-only.",
       },
     ],
-    queryParams: [],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Only needed when key is a slug (slugs are unique per game)." }],
+  },
+  {
+    key: "resolve",
+    path: "/api/resolve/{type}/{key}",
+    title: "Resolve slug to id",
+    desc: "Looks up a plugin or author's numeric id from its pretty-URL slug (e.g. 117hd). A numeric id passed in resolves straight through, so this also works as a plain existence check.",
+    pathParams: [
+      { name: "type", type: "enum", options: ["plugin", "author"], default: "plugin", required: true, desc: "plugin or author." },
+      { name: "key", type: "int", required: true, desc: "Plugin or author id or name slug, matching type above. Search by name below.", pickerKindFrom: "type" },
+    ],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Only needed when key is a slug (slugs are unique per game)." }],
   },
   {
     key: "stats",
