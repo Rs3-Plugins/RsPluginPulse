@@ -11,9 +11,15 @@ APP_ROOT=/srv/rspluginpulse
 API_PORT=3011
 PROXY_PORT=8090
 STATS_PORT=8091
-# How often ingest runs. 4h matches mod.io/RuneLite not changing fast enough
-# to need anything tighter.
-INGEST_INTERVAL="${INGEST_INTERVAL:-4h}"
+# How often ingest runs. 1h matches how often the upstream data actually
+# changes: mod.io's own figures don't move meaningfully faster than that,
+# and phyce (runelite.phyce.dev, the site behind the historical RuneLite
+# backfill) confirmed his own aggregated install-count numbers only
+# refresh hourly too and asked not to be polled more often than that --
+# relevant if this ever polls his site again, and a useful data point for
+# api.runelite.net's own cadence even though that's a separate, official
+# RuneLite endpoint we already poll directly.
+INGEST_INTERVAL="${INGEST_INTERVAL:-1h}"
 # How often the GoAccess report is rebuilt.
 STATS_INTERVAL="${STATS_INTERVAL:-3min}"
 # GoAccess built-in theme: darkBlue | darkPurple | darkGray | bright.
