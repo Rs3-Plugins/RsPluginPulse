@@ -43,19 +43,24 @@ function findPointNearDays(points: PluginTrendPoint[], daysAgo: number): PluginT
   return candidate;
 }
 
-function dailySeriesFromTrend(trend: PluginTrendPoint[], days: number): number[] {
+// RuneLite has no per-day download figure -- downloadsToday is always 0
+// for it (see runelite.ts), which is exactly why this sparkline used to
+// render flat for every RuneLite plugin/author. Its downloadsTotal is
+// already a live install gauge, not a cumulative counter, so plotting its
+// day-by-day level (not a diff) is the real trend line for that game.
+function dailySeriesFromTrend(trend: PluginTrendPoint[], days: number, game: string): number[] {
   const byDay = new Map<string, number>();
-  for (const p of trend) byDay.set(p.capturedAt.slice(0, 10), p.downloadsToday);
+  for (const p of trend) byDay.set(p.capturedAt.slice(0, 10), game === "runelite" ? p.downloadsTotal : p.downloadsToday);
   const sorted = Array.from(byDay.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1));
   return sorted.slice(-days).map(([, v]) => v);
 }
 
-async function authorDailySeries(pluginIds: number[], days: number): Promise<number[]> {
+async function authorDailySeries(pluginIds: number[], days: number, game: string): Promise<number[]> {
   const trends = await Promise.all(pluginIds.map((id) => getPluginTrend(id)));
   const sums = new Map<string, number>();
   for (const trend of trends) {
     const byDay = new Map<string, number>();
-    for (const p of trend) byDay.set(p.capturedAt.slice(0, 10), p.downloadsToday);
+    for (const p of trend) byDay.set(p.capturedAt.slice(0, 10), game === "runelite" ? p.downloadsTotal : p.downloadsToday);
     for (const [day, v] of byDay) sums.set(day, (sums.get(day) ?? 0) + v);
   }
   const sorted = Array.from(sums.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1));
@@ -124,6 +129,7 @@ export async function renderCardSvg(type: EmbedCardType, entityId: number, optio
   let statThird: { label: string; value: string } | null;
   let imageUrl: string | null = null;
   let dailyValues: number[] = [];
+  let game: string;
 
   if (type === "plugin") {
     const plugin = await getPlugin(entityId);
@@ -145,7 +151,8 @@ export async function renderCardSvg(type: EmbedCardType, entityId: number, optio
     // Subscribers is the exact same number as installs for RuneLite, so
     // there's no real third stat to show there.
     statThird = plugin.game === "runelite" ? null : { label: "Subscribers", value: last.subscribersTotal.toLocaleString() };
-    if (options.spark) dailyValues = dailySeriesFromTrend(trend, sparkDays);
+    game = plugin.game;
+    if (options.spark) dailyValues = dailySeriesFromTrend(trend, sparkDays, game);
   } else {
     const author = await getAuthorProfile(entityId);
     if (!author) return null;
@@ -159,7 +166,8 @@ export async function renderCardSvg(type: EmbedCardType, entityId: number, optio
     statWeek = { label: "This week", value: `${author.totals.weeklyGain >= 0 ? "+" : ""}${author.totals.weeklyGain.toLocaleString()}` };
     // RuneLite has no daily-installs figure, so "Today" would always read 0.
     statThird = author.game === "runelite" ? null : { label: "Today", value: author.totals.downloadsToday.toLocaleString() };
-    if (options.spark) dailyValues = await authorDailySeries(author.plugins.map((p) => p.id), sparkDays);
+    game = author.game;
+    if (options.spark) dailyValues = await authorDailySeries(author.plugins.map((p) => p.id), sparkDays, game);
   }
 
   const stats = [
@@ -247,7 +255,7 @@ export async function renderCardSvg(type: EmbedCardType, entityId: number, optio
   let footerBlock = "";
   if (options.showFooter) {
     const footerBaselineY = y + 12;
-    const footerLeft = shapes ? `Downloads per day · last ${sparkDays} days` : "";
+    const footerLeft = shapes ? (game === "runelite" ? `Installs · last ${sparkDays} days` : `Downloads per day · last ${sparkDays} days`) : "";
     footerBlock = `<text x="${PAD}" y="${footerBaselineY}" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="11" fill="${pal.dim}">${escapeXml(footerLeft)}</text>
       <text x="${width - PAD}" y="${footerBaselineY}" text-anchor="end" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="11" fill="${pal.dim}">rspluginpulse.com</text>`;
     y += 20;
