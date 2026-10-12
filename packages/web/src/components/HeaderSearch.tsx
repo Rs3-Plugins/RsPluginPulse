@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { search as searchApi, type SearchAuthorRow, type SearchPluginRow } from "../api";
 import { useGame } from "../context/GameContext";
+import { highlight, initials, SearchBox, type SearchBoxGroup, type SearchBoxItem } from "./SearchBox";
 
 interface FlatItem {
   href: string;
@@ -12,34 +13,15 @@ function formatCompact(n: number): string {
   return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(n);
 }
 
-function initials(name: string): string {
-  return name.slice(0, 2).toUpperCase();
-}
-
-function Avatar({ name, url, variant }: { name: string; url: string | null; variant: "desktop" | "palette" }) {
-  const wrapClass = variant === "desktop" ? "pp-search__avatar" : "pp-palette__avatar";
-  const imgClass = variant === "desktop" ? "pp-search__avatar-img" : "pp-palette__avatar-img";
-  const fallbackClass = variant === "desktop" ? "pp-search__avatar-fallback" : "pp-palette__avatar-fallback";
+function PaletteAvatar({ name, url }: { name: string; url: string | null }) {
   return (
-    <span className={wrapClass}>
-      {url ? <img src={url} alt="" referrerPolicy="no-referrer" className={imgClass} /> : <span className={fallbackClass}>{initials(name)}</span>}
+    <span className="pp-palette__avatar">
+      {url ? (
+        <img src={url} alt="" referrerPolicy="no-referrer" className="pp-palette__avatar-img" />
+      ) : (
+        <span className="pp-palette__avatar-fallback">{initials(name)}</span>
+      )}
     </span>
-  );
-}
-
-// Wraps the first case-insensitive occurrence of `query` inside `name` in
-// <mark>, per the spec's "wrap the matched substring" instruction.
-function highlight(name: string, query: string): ReactNode {
-  const q = query.trim();
-  if (!q) return name;
-  const idx = name.toLowerCase().indexOf(q.toLowerCase());
-  if (idx === -1) return name;
-  return (
-    <>
-      {name.slice(0, idx)}
-      <mark>{name.slice(idx, idx + q.length)}</mark>
-      {name.slice(idx + q.length)}
-    </>
   );
 }
 
@@ -55,7 +37,6 @@ export function HeaderSearch() {
 
   const desktopInputRef = useRef<HTMLInputElement>(null);
   const paletteInputRef = useRef<HTMLInputElement>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
   const requestIdRef = useRef(0);
 
   const isOpen = desktopOpen || paletteOpen;
@@ -100,10 +81,6 @@ export function HeaderSearch() {
     ];
   }, [result]);
 
-  function closeDesktop() {
-    setDesktopOpen(false);
-  }
-
   function closePalette() {
     setPaletteOpen(false);
   }
@@ -112,20 +89,10 @@ export function HeaderSearch() {
     navigate(href);
     setQuery("");
     setResult(null);
-    closeDesktop();
+    setDesktopOpen(false);
     closePalette();
     desktopInputRef.current?.blur();
   }
-
-  // Click-away for the desktop dropdown (the scrim covers the rest of the page).
-  useEffect(() => {
-    if (!desktopOpen) return;
-    function onOutside(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) closeDesktop();
-    }
-    document.addEventListener("mousedown", onOutside);
-    return () => document.removeEventListener("mousedown", onOutside);
-  }, [desktopOpen]);
 
   // Lock body scroll + autofocus while the mobile/tablet popup is open.
   useEffect(() => {
@@ -144,8 +111,7 @@ export function HeaderSearch() {
   useEffect(() => {
     function openForViewport() {
       if (window.matchMedia("(min-width: 1080px)").matches) {
-        setDesktopOpen(true);
-        setTimeout(() => desktopInputRef.current?.focus(), 0);
+        desktopInputRef.current?.focus();
       } else {
         setPaletteOpen(true);
       }
@@ -167,10 +133,9 @@ export function HeaderSearch() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  function onKeyDownInput(e: ReactKeyboardEvent<HTMLInputElement>) {
+  function onPaletteKeyDown(e: ReactKeyboardEvent<HTMLInputElement>) {
     if (e.key === "Escape") {
       e.preventDefault();
-      closeDesktop();
       closePalette();
       e.currentTarget.blur();
     } else if (e.key === "ArrowDown") {
@@ -190,15 +155,35 @@ export function HeaderSearch() {
   const pluginGroupLabel = trending ? "Trending plugins" : "Plugins";
   const authorGroupLabel = trending ? "Trending authors" : "Authors";
   const showEmpty = result !== null && flatItems.length === 0 && !trending;
+  const emptyMessage = trending ? "Nothing trending yet." : `No plugins or authors match "${query.trim()}".`;
 
-  function renderRows(variant: "desktop" | "palette") {
+  // No avatarUrl key on plugin items -- SearchBox only reserves an avatar
+  // slot when the key is present at all, and plugin rows stay text-only.
+  const groups = useMemo<SearchBoxGroup[]>(() => {
+    if (!result) return [];
+    const pluginItems: SearchBoxItem[] = result.plugins.map((p) => ({
+      id: p.id,
+      name: p.name,
+      sub: `by ${p.author}`,
+      value: formatCompact(p.total),
+      href: `/plugin/${p.id}`,
+    }));
+    const authorItems: SearchBoxItem[] = result.authors.map((a) => ({
+      id: a.id,
+      name: a.name,
+      sub: `${a.pluginCount} plugin${a.pluginCount === 1 ? "" : "s"}`,
+      value: formatCompact(a.total),
+      avatarUrl: a.avatarUrl,
+      href: `/author/${a.id}`,
+    }));
+    return [
+      { label: pluginGroupLabel, items: pluginItems },
+      { label: authorGroupLabel, items: authorItems },
+    ];
+  }, [result, pluginGroupLabel, authorGroupLabel]);
+
+  function renderPaletteRows() {
     if (!result) return null;
-    const rowClass = variant === "desktop" ? "pp-search__row" : "pp-palette__row";
-    const groupClass = variant === "desktop" ? "pp-search__group" : "pp-palette__group";
-    const subClass = variant === "desktop" ? "pp-search__sub" : "pp-palette__sub";
-    const valClass = variant === "desktop" ? "pp-search__val" : "pp-palette__val";
-    const emptyClass = variant === "desktop" ? "pp-search__empty" : "pp-palette__empty";
-
     let index = -1;
     const pluginRows = result.plugins.map((p) => {
       index += 1;
@@ -207,7 +192,7 @@ export function HeaderSearch() {
       return (
         <a
           key={`plugin-${p.id}`}
-          className={rowClass}
+          className="pp-palette__row"
           role="option"
           aria-selected={i === activeIndex}
           href={href}
@@ -217,17 +202,11 @@ export function HeaderSearch() {
             pick(href);
           }}
         >
-          {variant === "desktop" ? (
-            <span className="pp-search__label">
-              <b>{highlight(p.name, query)}</b> <span className={subClass}>by {p.author}</span>
-            </span>
-          ) : (
-            <span className="pp-palette__text">
-              <span className="pp-palette__name">{highlight(p.name, query)}</span>
-              <span className={subClass}>by {p.author}</span>
-            </span>
-          )}
-          <span className={valClass}>{formatCompact(p.total)}</span>
+          <span className="pp-palette__text">
+            <span className="pp-palette__name">{highlight(p.name, query)}</span>
+            <span className="pp-palette__sub">by {p.author}</span>
+          </span>
+          <span className="pp-palette__val">{formatCompact(p.total)}</span>
         </a>
       );
     });
@@ -239,7 +218,7 @@ export function HeaderSearch() {
       return (
         <a
           key={`author-${a.id}`}
-          className={rowClass}
+          className="pp-palette__row"
           role="option"
           aria-selected={i === activeIndex}
           href={href}
@@ -249,83 +228,42 @@ export function HeaderSearch() {
             pick(href);
           }}
         >
-          <Avatar name={a.name} url={a.avatarUrl} variant={variant} />
-          {variant === "desktop" ? (
-            <span className="pp-search__label">
-              <b>{highlight(a.name, query)}</b>{" "}
-              <span className={subClass}>
-                {a.pluginCount} plugin{a.pluginCount === 1 ? "" : "s"}
-              </span>
+          <PaletteAvatar name={a.name} url={a.avatarUrl} />
+          <span className="pp-palette__text">
+            <span className="pp-palette__name">{highlight(a.name, query)}</span>
+            <span className="pp-palette__sub">
+              {a.pluginCount} plugin{a.pluginCount === 1 ? "" : "s"}
             </span>
-          ) : (
-            <span className="pp-palette__text">
-              <span className="pp-palette__name">{highlight(a.name, query)}</span>
-              <span className={subClass}>
-                {a.pluginCount} plugin{a.pluginCount === 1 ? "" : "s"}
-              </span>
-            </span>
-          )}
-          <span className={valClass}>{formatCompact(a.total)}</span>
+          </span>
+          <span className="pp-palette__val">{formatCompact(a.total)}</span>
         </a>
       );
     });
 
     return (
       <>
-        {result.plugins.length > 0 && <div className={groupClass}>{pluginGroupLabel}</div>}
+        {result.plugins.length > 0 && <div className="pp-palette__group">{pluginGroupLabel}</div>}
         {pluginRows}
-        {result.authors.length > 0 && (
-          <div className={`${groupClass} ${variant === "desktop" ? "pp-search__group--split" : ""}`}>{authorGroupLabel}</div>
-        )}
+        {result.authors.length > 0 && <div className="pp-palette__group">{authorGroupLabel}</div>}
         {authorRows}
-        {showEmpty && <div className={emptyClass}>No plugins or authors match &ldquo;{query.trim()}&rdquo;.</div>}
+        {showEmpty && <div className="pp-palette__empty">{emptyMessage}</div>}
       </>
     );
   }
 
   return (
     <>
-      <div className="pp-search" data-open={desktopOpen ? "true" : "false"} ref={rootRef}>
-        <SearchIcon className="pp-search__icon" size={14} />
-        <input
-          ref={desktopInputRef}
-          className="pp-search__input"
-          type="search"
-          placeholder="Search plugins…"
-          aria-label="Search plugins and authors"
-          aria-expanded={desktopOpen}
-          aria-controls="pp-search-results"
-          autoComplete="off"
-          value={query}
-          onFocus={() => setDesktopOpen(true)}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={onKeyDownInput}
-        />
-        {query && (
-          <button
-            type="button"
-            className="pp-search__clear"
-            aria-label="Clear search"
-            onClick={() => {
-              setQuery("");
-              desktopInputRef.current?.focus();
-            }}
-          >
-            ×
-          </button>
-        )}
-
-        {desktopOpen && (
-          <div className="pp-search__dd" id="pp-search-results" role="listbox" aria-label="Search results">
-            <div className="pp-search__dd-head">
-              <span className="pp-search__dd-title">Plugins &amp; authors</span>
-              <span className="pp-search__dd-hint">Enter to open · Esc to close</span>
-            </div>
-            <div className="pp-search__dd-body">{renderRows("desktop")}</div>
-          </div>
-        )}
-      </div>
-      {desktopOpen && <div className="pp-search__scrim" onClick={closeDesktop} />}
+      <SearchBox
+        ref={desktopInputRef}
+        query={query}
+        onQueryChange={setQuery}
+        groups={groups}
+        onPick={(item) => pick(item.href!)}
+        onOpenChange={setDesktopOpen}
+        placeholder="Search plugins…"
+        loading={result === null}
+        emptyMessage={emptyMessage}
+      />
 
       <button
         type="button"
@@ -352,14 +290,14 @@ export function HeaderSearch() {
                 autoComplete="off"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={onKeyDownInput}
+                onKeyDown={onPaletteKeyDown}
               />
               <button type="button" className="pp-palette__close" aria-label="Close search" onClick={closePalette}>
                 Esc
               </button>
             </div>
             <div className="pp-palette__body" role="listbox">
-              {renderRows("palette")}
+              {renderPaletteRows()}
             </div>
             <div className="pp-palette__foot">
               <span>↑↓ to move</span>

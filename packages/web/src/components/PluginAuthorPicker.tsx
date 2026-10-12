@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { highlight as highlightMatch } from "./SearchBox";
 
 export interface PickerItem {
   id: number;
@@ -21,7 +22,7 @@ interface Props {
 export function PluginAuthorPicker({ items, value, onChange, placeholder, loading }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [highlight, setHighlight] = useState(0);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [dropUp, setDropUp] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -34,7 +35,7 @@ export function PluginAuthorPicker({ items, value, onChange, placeholder, loadin
   useEffect(() => {
     if (!open) return;
     setQuery("");
-    setHighlight(0);
+    setHighlightedIndex(0);
     const t = setTimeout(() => searchRef.current?.focus(), 0);
     return () => clearTimeout(t);
   }, [open]);
@@ -65,13 +66,13 @@ export function PluginAuthorPicker({ items, value, onChange, placeholder, loadin
       setOpen(false);
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      setHighlight((h) => Math.min(h + 1, filtered.length - 1));
+      setHighlightedIndex((h) => Math.min(h + 1, filtered.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setHighlight((h) => Math.max(h - 1, 0));
+      setHighlightedIndex((h) => Math.max(h - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      const item = filtered[highlight];
+      const item = filtered[highlightedIndex];
       if (item) pick(item);
     }
   }
@@ -94,7 +95,7 @@ export function PluginAuthorPicker({ items, value, onChange, placeholder, loadin
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
-              setHighlight(0);
+              setHighlightedIndex(0);
             }}
           />
           <div className="picker-list">
@@ -103,13 +104,13 @@ export function PluginAuthorPicker({ items, value, onChange, placeholder, loadin
               <button
                 key={item.id}
                 type="button"
-                className={`picker-row ${i === highlight ? "highlight" : ""}`}
-                onMouseEnter={() => setHighlight(i)}
+                className="pp-search__row"
+                aria-selected={i === highlightedIndex}
+                onMouseEnter={() => setHighlightedIndex(i)}
                 onClick={() => pick(item)}
               >
-                <span className="picker-row-main">
-                  <span className="picker-row-name">{item.name}</span>
-                  <span className="picker-row-sub">{item.sub}</span>
+                <span className="pp-search__label">
+                  <b>{highlightMatch(item.name, query)}</b> <span className="pp-search__sub">{item.sub}</span>
                 </span>
                 {item.id === value && <span className="picker-check">✓</span>}
               </button>
