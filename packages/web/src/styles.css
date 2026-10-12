@@ -3814,121 +3814,19 @@ a:hover {
   color: var(--dim);
 }
 
-/* Plugin/author combobox picker */
+/* Plugin/author combobox picker -- a SearchBox instance, just widened to
+   fill its narrow sidebar field and left-anchored (instead of the header's
+   fixed 340px/right-anchored dropdown, which would overhang this field's
+   container on the right). */
 
-.picker {
-  position: relative;
-}
-
-.picker-trigger {
+.picker-search-box.pp-search {
   width: 100%;
-  box-sizing: border-box;
-  height: 38px;
-  padding: 0 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  background: var(--surface2);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--text);
-  font-family: inherit;
-  font-size: 13px;
-  cursor: pointer;
 }
 
-.picker-trigger:hover,
-.picker-trigger.open {
-  border-color: var(--gold);
-}
-
-.picker-trigger-label {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.picker-chevron {
-  flex: none;
-  color: var(--dim);
-  transition: transform 0.15s;
-}
-
-.picker-chevron.flipped {
-  transform: rotate(180deg);
-}
-
-.picker-popover {
-  position: absolute;
-  top: calc(100% + 4px);
+.picker-search-box .pp-search__dd {
   left: 0;
-  z-index: 20;
-  width: max(300px, 100%);
-  background: var(--raise);
-  border: 1px solid var(--line2);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.picker-popover.drop-up {
-  top: auto;
-  bottom: calc(100% + 4px);
-}
-
-.picker-search {
-  margin: 8px;
-  height: 34px;
-  padding: 0 10px;
-  background: var(--surface2);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--text);
-  font-family: inherit;
-  font-size: 13px;
-  outline: none;
-}
-
-.picker-search:focus {
-  border-color: var(--gold);
-}
-
-.picker-list {
-  max-height: 280px;
-  overflow-y: auto;
-  padding: 0 6px 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.picker-empty {
-  padding: 16px;
-  text-align: center;
-  font-size: 13px;
-  color: var(--dim);
-}
-
-.picker-check {
-  flex: none;
-  color: var(--gold);
-  font-size: 13px;
-}
-
-.picker-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px;
-  border-top: 1px solid var(--line);
-  font-size: 11px;
-  color: var(--dim);
+  right: auto;
+  width: max(280px, 100%);
 }
 
 /* Badge builder */
