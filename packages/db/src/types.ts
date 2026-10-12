@@ -6,6 +6,7 @@ export interface PluginLeaderboardRow {
   name: string;
   authorId: number;
   authorName: string;
+  authorAvatarUrl: string | null;
   profileUrl: string;
   tags: string[];
   value: number;
@@ -14,8 +15,30 @@ export interface PluginLeaderboardRow {
 export interface AuthorLeaderboardRow {
   authorId: number;
   authorName: string;
+  avatarUrl: string | null;
   pluginCount: number;
   value: number;
+}
+
+export interface SearchPluginRow {
+  id: number;
+  name: string;
+  author: string;
+  authorAvatarUrl: string | null;
+  total: number;
+}
+
+export interface SearchAuthorRow {
+  id: number;
+  name: string;
+  avatarUrl: string | null;
+  pluginCount: number;
+  total: number;
+}
+
+export interface SearchResult {
+  plugins: SearchPluginRow[];
+  authors: SearchAuthorRow[];
 }
 
 export interface NewestPluginRow {

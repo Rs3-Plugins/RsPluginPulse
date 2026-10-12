@@ -22,6 +22,7 @@ import type {
   Period,
   PluginLeaderboardRow,
   PluginTrendPoint,
+  SearchResult,
   SiteStats,
   StatsOverview,
 } from "./types";
@@ -313,7 +314,7 @@ const LEADERBOARD_EXCLUDED_TAG = "Library for other Plugins";
 async function topPluginsByLatestMetric(metric: "downloads_total" | "downloads_today", game: string, limit: number): Promise<PluginLeaderboardRow[]> {
   const pool = getPool();
   const { rows } = await pool.query(
-    `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.profile_url, p.tags, l.${metric} AS value
+    `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.author_avatar_url, p.profile_url, p.tags, l.${metric} AS value
      FROM plugins p
      JOIN LATERAL (
        SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
@@ -332,7 +333,7 @@ async function topPluginsByLatestMetric(metric: "downloads_total" | "downloads_t
 async function topPluginsByGain(cutoffDays: number, game: string, limit: number): Promise<PluginLeaderboardRow[]> {
   const pool = getPool();
   const { rows } = await pool.query(
-    `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.profile_url, p.tags,
+    `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.author_avatar_url, p.profile_url, p.tags,
             l.downloads_total - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total) AS value
      FROM plugins p
      JOIN LATERAL (
@@ -427,6 +428,7 @@ export async function getTopAuthors(period: Period, limit = 50, game = "rs3"): P
       byAuthor.set(plugin.authorId, {
         authorId: plugin.authorId,
         authorName: plugin.authorName,
+        avatarUrl: plugin.authorAvatarUrl,
         pluginCount: 1,
         value: plugin.value,
       });
@@ -436,6 +438,113 @@ export async function getTopAuthors(period: Period, limit = 50, game = "rs3"): P
     .sort((a, b) => b.value - a.value)
     .slice(0, limit);
 }
+
+// Trending fallback for an empty query, plus a name/author substring
+// match for a real one, always ranked by total downloads -- the most
+// popular match leads regardless of *why* it matched. Authors are
+// aggregated via plugin_authors so a co-author's search hit counts every
+// plugin they're credited on, not just plugins.author_id.
+export async function searchPluginsAndAuthors(
+  game: string,
+  query: string,
+  pluginLimit = 6,
+  authorLimit = 4,
+): Promise<SearchResult> {
+  const q = query.trim();
+  const pool = getPool();
+
+  if (!q) {
+    // Trending counts are fixed regardless of the caller's limit -- the
+    // header search always shows "top 5 plugins + top 3 authors" when idle.
+    const [plugins, authors] = await Promise.all([
+      getTopPlugins("weekly", 5, game),
+      getTopAuthors("weekly", 3, game),
+    ]);
+    return {
+      plugins: plugins.map((p) => ({
+        id: p.id,
+        name: p.name,
+        author: p.authorName,
+        authorAvatarUrl: p.authorAvatarUrl,
+        total: p.value,
+      })),
+      authors: authors.map((a) => ({
+        id: a.authorId,
+        name: a.authorName,
+        avatarUrl: a.avatarUrl,
+        pluginCount: a.pluginCount,
+        total: a.value,
+      })),
+    };
+  }
+
+  // Match quality still gates *which* rows qualify (see the WHERE clauses
+  // below), but the highest-ranked (most downloaded) match always sorts
+  // first within those -- a popular plugin found via its author's name
+  // should outrank an obscure exact-name match.
+  const pluginsResult = await pool.query(
+    `WITH latest AS (
+       SELECT DISTINCT ON (s.plugin_id) s.plugin_id, s.downloads_total
+       FROM plugin_snapshots s
+       ORDER BY s.plugin_id, s.captured_at DESC
+     )
+     SELECT p.id, p.name, p.author_name, p.author_avatar_url, l.downloads_total AS total
+     FROM plugins p
+     JOIN latest l ON l.plugin_id = p.id
+     WHERE p.game = $2
+       AND NOT ($3 = ANY(p.tags))
+       AND (
+         p.name ILIKE '%' || $1 || '%'
+         OR EXISTS (
+           SELECT 1 FROM plugin_authors pa WHERE pa.plugin_id = p.id AND pa.author_name ILIKE '%' || $1 || '%'
+         )
+       )
+     ORDER BY total DESC
+     LIMIT $4`,
+    [q, game, LEADERBOARD_EXCLUDED_TAG, pluginLimit],
+  );
+
+  const authorsResult = await pool.query(
+    `WITH latest AS (
+       SELECT DISTINCT ON (s.plugin_id) s.plugin_id, s.downloads_total
+       FROM plugin_snapshots s
+       ORDER BY s.plugin_id, s.captured_at DESC
+     ),
+     agg AS (
+       SELECT pa.author_id, MAX(pa.author_name) AS author_name, MAX(pa.author_avatar_url) AS author_avatar_url,
+              COUNT(DISTINCT pa.plugin_id) AS plugin_count, SUM(l.downloads_total) AS total
+       FROM plugin_authors pa
+       JOIN plugins p ON p.id = pa.plugin_id
+       JOIN latest l ON l.plugin_id = p.id
+       WHERE p.game = $2 AND NOT ($3 = ANY(p.tags))
+       GROUP BY pa.author_id
+     )
+     SELECT author_id, author_name, author_avatar_url, plugin_count, total
+     FROM agg
+     WHERE author_name ILIKE '%' || $1 || '%'
+     ORDER BY total DESC
+     LIMIT $4`,
+    [q, game, LEADERBOARD_EXCLUDED_TAG, authorLimit],
+  );
+
+  return {
+    plugins: pluginsResult.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      author: row.author_name,
+      authorAvatarUrl: row.author_avatar_url,
+      total: Number(row.total),
+    })),
+    authors: authorsResult.rows.map((row) => ({
+      id: row.author_id,
+      name: row.author_name,
+      avatarUrl: row.author_avatar_url,
+      pluginCount: Number(row.plugin_count),
+      total: Number(row.total),
+    })),
+  };
+}
+
 
 export interface PluginMeta {
   id: number;
@@ -531,6 +640,7 @@ function toPluginRow(row: any): PluginLeaderboardRow {
     name: row.name,
     authorId: row.author_id,
     authorName: row.author_name,
+    authorAvatarUrl: row.author_avatar_url,
     profileUrl: row.profile_url,
     tags: row.tags ?? [],
     value: Number(row.value),

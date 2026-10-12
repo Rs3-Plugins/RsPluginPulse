@@ -8,6 +8,7 @@ export interface PluginLeaderboardRow {
   name: string;
   authorId: number;
   authorName: string;
+  authorAvatarUrl: string | null;
   profileUrl: string;
   tags: string[];
   value: number;
@@ -16,8 +17,30 @@ export interface PluginLeaderboardRow {
 export interface AuthorLeaderboardRow {
   authorId: number;
   authorName: string;
+  avatarUrl: string | null;
   pluginCount: number;
   value: number;
+}
+
+export interface SearchPluginRow {
+  id: number;
+  name: string;
+  author: string;
+  authorAvatarUrl: string | null;
+  total: number;
+}
+
+export interface SearchAuthorRow {
+  id: number;
+  name: string;
+  avatarUrl: string | null;
+  pluginCount: number;
+  total: number;
+}
+
+export interface SearchResult {
+  plugins: SearchPluginRow[];
+  authors: SearchAuthorRow[];
 }
 
 export interface FastestGrowingPlugin {
@@ -233,6 +256,12 @@ export function getPluginTrend(pluginId: number) {
 
 export function getAuthorProfile(authorId: number) {
   return getJson<AuthorProfile>(`/api/authors/${authorId}`);
+}
+
+export function search(query: string, game: Game = "rs3", limit?: number) {
+  const params = new URLSearchParams({ q: query, game });
+  if (limit) params.set("limit", String(limit));
+  return getJson<SearchResult>(`/api/search?${params}`);
 }
 
 export function getStatus(game?: Game) {

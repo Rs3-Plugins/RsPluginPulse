@@ -14,6 +14,7 @@ import { HotCard } from "./HotCard";
 import { TagChips, TagFilter, matchesTags, type TagState } from "./TagFilter";
 import { Dropdown } from "./Dropdown";
 import { Pagination, PAGE_SIZE_OPTIONS } from "./Pagination";
+import { SearchBox } from "./SearchBox";
 import { useGame, type Game } from "../context/GameContext";
 
 type Entity = "plugins" | "authors" | "growth" | "new";
@@ -375,26 +376,12 @@ export function Leaderboard() {
                 )}
 
                 <div className="search-box">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="11" cy="11" r="7" />
-                    <path d="M21 21l-4.3-4.3" />
-                  </svg>
-                  <input
+                  <SearchBox
                     ref={searchRef}
-                    type="text"
-                    className="search-input"
+                    query={query}
+                    onQueryChange={setQuery}
                     placeholder={entity === "authors" || isGrowthAuthors ? "Search authors…" : "Search plugins…"}
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") setQuery("");
-                    }}
                   />
-                  {query && (
-                    <button className="search-clear" aria-label="Clear search" onClick={() => setQuery("")}>
-                      ×
-                    </button>
-                  )}
                   {entity !== "growth" && game !== "runelite" && (
                     <TagFilter
                       tagState={tagState}
@@ -589,6 +576,7 @@ function aggregateAuthors(plugins: PluginLeaderboardRow[]): AuthorLeaderboardRow
       byAuthor.set(plugin.authorId, {
         authorId: plugin.authorId,
         authorName: plugin.authorName,
+        avatarUrl: plugin.authorAvatarUrl,
         pluginCount: 1,
         value: plugin.value,
       });

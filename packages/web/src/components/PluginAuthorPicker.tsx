@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { SearchBox, type SearchBoxGroup, type SearchBoxItem } from "./SearchBox";
 
 export interface PickerItem {
   id: number;
@@ -8,6 +9,9 @@ export interface PickerItem {
   // builders) ignore this. A navigational search needs to know which kind
   // of page to go to, which onChange's second argument carries.
   kind?: string;
+  // Omit entirely for no avatar slot at all (plugin items); pass null when
+  // the entity just doesn't have one set (author items with no avatar).
+  avatarUrl?: string | null;
 }
 
 interface Props {
@@ -18,109 +22,66 @@ interface Props {
   loading?: boolean;
 }
 
+// A combobox built on the shared SearchBox: shows the current selection's
+// name while blurred, clears to let you browse/search the full list while
+// focused, and restores the selection's name if you close without picking.
 export function PluginAuthorPicker({ items, value, onChange, placeholder, loading }: Props) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [highlight, setHighlight] = useState(0);
-  const [dropUp, setDropUp] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
-
   const current = items.find((i) => i.id === value) ?? null;
+  const [query, setQuery] = useState(current?.name ?? "");
+  const isOpenRef = useRef(false);
+  const pickedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isOpenRef.current) setQuery(current ? current.name : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, items]);
+
   const q = query.trim().toLowerCase();
   const filtered = q ? items.filter((i) => i.name.toLowerCase().includes(q) || i.sub.toLowerCase().includes(q)) : items;
 
-  useEffect(() => {
-    if (!open) return;
-    setQuery("");
-    setHighlight(0);
-    const t = setTimeout(() => searchRef.current?.focus(), 0);
-    return () => clearTimeout(t);
-  }, [open]);
+  const groups: SearchBoxGroup[] = [
+    {
+      label: `${filtered.length} result${filtered.length === 1 ? "" : "s"}`,
+      items: filtered.map((i) => ({
+        id: i.id,
+        name: i.name,
+        sub: i.sub,
+        value: i.id === value ? "✓" : undefined,
+        avatarUrl: i.avatarUrl,
+      })),
+    },
+  ];
 
-  useEffect(() => {
-    if (!open) return;
-    function onOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+  function handleOpenChange(open: boolean) {
+    isOpenRef.current = open;
+    if (open) {
+      setQuery("");
+    } else if (pickedRef.current) {
+      pickedRef.current = false;
+    } else {
+      setQuery(current ? current.name : "");
     }
-    document.addEventListener("mousedown", onOutside);
-    return () => document.removeEventListener("mousedown", onOutside);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open || !triggerRef.current) return;
-    const rect = triggerRef.current.getBoundingClientRect();
-    setDropUp(window.innerHeight - rect.bottom < 320);
-  }, [open]);
-
-  function pick(item: PickerItem) {
-    onChange(item.id, item);
-    setOpen(false);
   }
 
-  function onKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      setOpen(false);
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setHighlight((h) => Math.min(h + 1, filtered.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setHighlight((h) => Math.max(h - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const item = filtered[highlight];
-      if (item) pick(item);
-    }
+  function handlePick(picked: SearchBoxItem) {
+    const item = items.find((i) => i.id === picked.id);
+    if (!item) return;
+    pickedRef.current = true;
+    onChange(item.id, item);
   }
 
   return (
-    <div className="picker" ref={ref}>
-      <button ref={triggerRef} type="button" className={`picker-trigger ${open ? "open" : ""}`} onClick={() => setOpen((o) => !o)}>
-        <span className="picker-trigger-label">{current ? current.name : loading ? "Loading…" : placeholder}</span>
-        <svg width="12" height="12" viewBox="0 0 12 12" className={`picker-chevron ${open ? "flipped" : ""}`}>
-          <path d="M3 4.5L6 7.5L9 4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
-      {open && (
-        <div className={`picker-popover ${dropUp ? "drop-up" : ""}`} onKeyDown={onKeyDown}>
-          <input
-            ref={searchRef}
-            type="text"
-            className="picker-search"
-            placeholder="Search…"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setHighlight(0);
-            }}
-          />
-          <div className="picker-list">
-            {filtered.length === 0 && <div className="picker-empty">No matches</div>}
-            {filtered.map((item, i) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`picker-row ${i === highlight ? "highlight" : ""}`}
-                onMouseEnter={() => setHighlight(i)}
-                onClick={() => pick(item)}
-              >
-                <span className="picker-row-main">
-                  <span className="picker-row-name">{item.name}</span>
-                  <span className="picker-row-sub">{item.sub}</span>
-                </span>
-                {item.id === value && <span className="picker-check">✓</span>}
-              </button>
-            ))}
-          </div>
-          <div className="picker-footer">
-            <span>{filtered.length} results</span>
-            <span>↑↓ · Enter · Esc</span>
-          </div>
-        </div>
-      )}
-    </div>
+    <SearchBox
+      className="picker-search-box"
+      query={query}
+      onQueryChange={setQuery}
+      groups={groups}
+      onPick={handlePick}
+      onOpenChange={handleOpenChange}
+      placeholder={loading ? "Loading…" : placeholder}
+      emptyMessage="No matches."
+      dropdownAnchor="left"
+      dropdownMinWidth={280}
+    />
   );
 }

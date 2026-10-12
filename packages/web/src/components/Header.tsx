@@ -104,11 +104,11 @@ export function Header() {
               </Link>
             ))}
           </nav>
-
-          <HeaderSearch />
         </div>
 
         <div className="header-controls">
+          <HeaderSearch />
+
           <button className="theme-toggle randomizer-btn" onClick={handleRandomize} disabled={rolling}>
             <DiceIcon rolling={rolling} />
             {rolling ? "Rolling…" : "Randomizer"}
