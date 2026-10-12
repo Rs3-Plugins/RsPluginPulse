@@ -129,31 +129,31 @@ export function Header() {
           <GameSwitcher updatedLabel={updatedLabel} sourceLabel={dataSourceLabel(game)} />
 
           <button
-            className="pp-ghost pp-ghost--icon"
+            className="pp-ghost pp-ghost--icon pp-tip"
             onClick={handleRandomize}
             disabled={rolling}
-            title="Open a random plugin"
+            data-tooltip="Open a random plugin"
             aria-label="Open a random plugin"
           >
             <DiceIcon rolling={rolling} />
           </button>
 
           <a
-            className="pp-ghost pp-ghost--icon"
+            className="pp-ghost pp-ghost--icon pp-tip"
             href="https://ko-fi.com/mark7625"
             target="_blank"
             rel="noopener"
-            title="Buy me a coffee"
+            data-tooltip="Buy me a coffee"
             aria-label="Support PluginPulse — buy me a coffee"
           >
             <CoffeeIcon />
           </a>
 
           <button
-            className="pp-ghost pp-ghost--icon"
+            className="pp-ghost pp-ghost--icon pp-tip"
             onClick={toggleTheme}
             aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            data-tooltip={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
           >
             <ThemeIcon theme={theme} />
           </button>

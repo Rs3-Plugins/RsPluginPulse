@@ -530,6 +530,43 @@ body {
   justify-content: center;
 }
 
+/* Lightweight CSS-only tooltip for icon-only buttons (randomizer, coffee,
+   theme toggle) -- native `title` has a long, inconsistent hover delay and
+   is easy to miss, so this renders an actual visible label instead. */
+.pp-tip {
+  position: relative;
+}
+
+.pp-tip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  z-index: 50;
+  transform: translateX(-50%) translateY(-4px);
+  background: var(--raise);
+  color: var(--text);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+}
+
+.pp-tip:hover::after,
+.pp-tip:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+  transition-delay: 0.3s;
+}
+
 /* mobile top bar (<1000px): three round icon buttons replace the whole
    .pp-actions group -- see the breakpoints below. */
 .pp-mobile {
