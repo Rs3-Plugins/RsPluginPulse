@@ -62,12 +62,17 @@ async function authorDailySeries(pluginIds: number[], days: number): Promise<num
   return sorted.slice(-days).map(([, v]) => v);
 }
 
-function sparklineShapes(values: number[], width: number, height: number): { line: string; area: string } | null {
-  if (values.length < 2) return null;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+// Not enough real history for a meaningful line (new plugin/author, or a
+// game with no daily figure at all) still draws a flat one, at whatever
+// single value is known or 0 if there's none -- it's only ever omitted
+// entirely via options.spark=false at the call site, never because the
+// data happened to be thin.
+function sparklineShapes(values: number[], width: number, height: number): { line: string; area: string } {
+  const padded = values.length >= 2 ? values : values.length === 1 ? [values[0], values[0]] : [0, 0];
+  const min = Math.min(...padded);
+  const max = Math.max(...padded);
   const range = max - min || 1;
-  const pts = values.map((v, i) => [(i / (values.length - 1)) * width, height - ((v - min) / range) * height] as const);
+  const pts = padded.map((v, i) => [(i / (padded.length - 1)) * width, height - ((v - min) / range) * height] as const);
   const line = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
   const area = `${line} L ${width.toFixed(1)} ${height.toFixed(1)} L 0 ${height.toFixed(1)} Z`;
   return { line, area };
