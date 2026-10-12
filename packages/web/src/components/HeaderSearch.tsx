@@ -255,6 +255,7 @@ export function HeaderSearch() {
     <>
       <SearchBox
         ref={desktopInputRef}
+        className="pp-search--header"
         query={query}
         onQueryChange={setQuery}
         groups={groups}

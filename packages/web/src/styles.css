@@ -517,10 +517,22 @@ body {
 /* ---------- Header search: desktop inline (>=1080px) ---------- */
 .pp-search {
   position: relative;
-  z-index: 41;
   width: 230px;
   display: flex;
   align-items: center;
+}
+
+/* SearchBox is reused outside the header too (the API explorer's picker),
+   where its dropdown only needs to clear its own local siblings. The
+   header's elevated z-index -- competing against the whole rest of the
+   page, since .site-header itself doesn't isolate a stacking context --
+   is scoped to this modifier instead of the shared base class, so it
+   doesn't fight other same-tier page content (this exact bug: a
+   mid-page SearchBox and the header's shared z-index:41, tied, with the
+   later-painted one in the DOM winning and showing through the header's
+   dropdown). */
+.pp-search--header {
+  z-index: 41;
 }
 
 .pp-search__icon {
