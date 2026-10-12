@@ -262,10 +262,13 @@ export async function renderCardSvg(type: EmbedCardType, entityId: number, optio
 
 // Discord (and most chat apps) don't render inline SVG in link
 // previews/embeds -- treats it as a generic file instead of an image -- so
-// cards ship as PNG. Rendered at 2x density so it stays crisp if a client
-// scales it up, same reasoning a @2x asset would get.
+// cards ship as PNG. Rendered 1:1 with the SVG's own declared width/height
+// (not at a higher density): a raster image's pixel size *is* its display
+// size wherever it's embedded with no explicit width override (our own
+// preview, Discord, a bare <img> tag), so doubling the pixel dimensions
+// for sharpness also doubles how big it shows up everywhere.
 export async function renderCardPng(type: EmbedCardType, entityId: number, options: EmbedCardOptions): Promise<Buffer | null> {
   const svg = await renderCardSvg(type, entityId, options);
   if (!svg) return null;
-  return sharp(Buffer.from(svg), { density: 144 }).png().toBuffer();
+  return sharp(Buffer.from(svg)).png().toBuffer();
 }
