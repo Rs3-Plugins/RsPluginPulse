@@ -155,6 +155,56 @@ they own a given author identity?
 - Could ship the low-friction version first and revisit if it's ever
   actually abused.
 
+### Other feature ideas worth considering (stretch / optional)
+
+Not in the core feature set above, but each reuses existing infra pretty
+cheaply and could be genuinely nice:
+
+- **Daily/weekly digest post** — auto-posted channel summary: biggest
+  gainers, biggest drops, new releases over the period. Reuses
+  `/api/stats/overview`'s `fastestGrowing`/`newReleases` data almost
+  as-is.
+- **Milestone celebrations** — distinct from the threshold-based
+  watch alerts: fire once, framed as an achievement, when a watched
+  plugin/author crosses a round number (10k / 100k / 500k / 1M). More fun
+  than a stat-swing notification, and naturally rate-limited since it only
+  fires once per milestone ever.
+- **New-release firehose channel** — a channel that gets a post for
+  *every* new plugin release (optionally filtered to specific tags), as
+  distinct from the targeted per-entity watchlist — good fit for a
+  plugin-hub-updates style channel some dev communities would want.
+- **Pinned, auto-updating leaderboard embed** — richer sibling to the
+  channel-topic templates: instead of just text in a channel's topic, a
+  bot message edited in place on the hourly tick, showing a real top-5/10
+  leaderboard with proper embed formatting (avatars, values, rank
+  movement arrows).
+- **`/compare <a> <b>`** — a Discord-native version of the site's existing
+  compare feature, head-to-head embed for two plugins or two authors.
+- **`/trend <plugin>` chart image** — a bigger standalone trend chart,
+  reusing the stats card's sparkline renderer at a larger size, for
+  someone who wants more than the small sparkline baked into `/plugin`.
+- **`/random`** — plugin discovery via the existing `/api/plugins/random`
+  endpoint; could also power a scheduled "plugin spotlight" post for
+  server engagement, not just an on-demand command.
+- **Personal DM follows** — `/follow author <name>` notifies the Discord
+  user by DM on that author's new releases, independent of any guild-wide
+  watchlist/channel setup — useful for someone who wants updates but isn't
+  a server admin anywhere.
+- **Role ping on milestone/alert** — optional "also ping @role" setting
+  alongside a watch entry, for the moments worth more than a quiet channel
+  post.
+- **Verified badge in bot output** — if the verified linking tier (see
+  **Account linking**) ships, show a checkmark next to a linked author's
+  name in `/myplugins`/`/author` output — a visible reward for doing the
+  harder verification flow instead of the trust-based one.
+- **`/status`** — mirrors the site's `/api/status`: "data last updated 12
+  minutes ago". Trivial to build, reassures anyone wondering why a number
+  hasn't moved yet.
+- **Autocomplete everywhere** — worth calling out as a baseline UX
+  requirement rather than a nice-to-have: every name-taking slash command
+  option should live-autocomplete via `/api/search` instead of making
+  people guess exact spelling/capitalization.
+
 ## Suggested architecture
 
 Fits the existing monorepo's pattern of one package per concern
