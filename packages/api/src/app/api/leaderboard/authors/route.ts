@@ -16,5 +16,5 @@ export async function GET(request: Request) {
   const authors = await remember(`leaderboard:authors:${period}:${limit}:${game}`, CACHE_CEILING.LEADERBOARD, freshness, () =>
     getTopAuthors(period, limit, game),
   );
-  return jsonWithCors({ period, authors });
+  return jsonWithCors({ period, authors }, { headers: { "Cache-Control": "public, max-age=300, stale-while-revalidate=1800" } });
 }

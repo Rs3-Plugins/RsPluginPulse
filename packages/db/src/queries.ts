@@ -62,11 +62,12 @@ export async function getExistingNameIds(game: string): Promise<Set<string>> {
 
 export async function getLatestSnapshotTime(game?: string): Promise<string | null> {
   const pool = getPool();
+  // game is denormalized onto plugin_snapshots itself (see schema.sql)
+  // specifically so this hits plugin_snapshots_game_captured_idx directly
+  // -- filtering via a join to plugins instead turns into a seq scan once
+  // this table passes a few hundred thousand rows.
   const { rows } = game
-    ? await pool.query(
-        `SELECT max(s.captured_at) AS latest FROM plugin_snapshots s JOIN plugins p ON p.id = s.plugin_id WHERE p.game = $1`,
-        [game],
-      )
+    ? await pool.query(`SELECT max(captured_at) AS latest FROM plugin_snapshots WHERE game = $1`, [game])
     : await pool.query(`SELECT max(captured_at) AS latest FROM plugin_snapshots`);
   return rows[0]?.latest ? rows[0].latest.toISOString() : null;
 }
@@ -273,10 +274,10 @@ export async function upsertPluginsAndSnapshot(mods: IngestedMod[], capturedAt: 
         ],
       );
       await client.query(
-        `INSERT INTO plugin_snapshots (plugin_id, captured_at, downloads_total, downloads_today, subscribers_total, popularity_rank_position)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO plugin_snapshots (plugin_id, captured_at, downloads_total, downloads_today, subscribers_total, popularity_rank_position, game)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (plugin_id, captured_at) DO NOTHING`,
-        [mod.id, capturedAt, mod.downloadsTotal, mod.downloadsToday, mod.subscribersTotal, mod.popularityRankPosition],
+        [mod.id, capturedAt, mod.downloadsTotal, mod.downloadsToday, mod.subscribersTotal, mod.popularityRankPosition, mod.game],
       );
 
       // Replace the roster wholesale each run -- cheap at this scale and

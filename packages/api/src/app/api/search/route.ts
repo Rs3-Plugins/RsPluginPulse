@@ -25,5 +25,5 @@ export async function GET(request: Request) {
       searchPluginsAndAuthors(game, q, pluginLimit, authorLimit),
     );
   }
-  return jsonWithCors(result);
+  return jsonWithCors(result, { headers: { "Cache-Control": "public, max-age=60, stale-while-revalidate=300" } });
 }
