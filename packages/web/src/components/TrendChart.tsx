@@ -88,7 +88,12 @@ export function TrendChart({ points, metric, unit, chartType }: Props) {
   function handleMove(e: React.PointerEvent<SVGRectElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    const nearest = points.length <= 1 ? 0 : Math.round((x / plotWidth) * (points.length - 1));
+    // rect.width is the hit-target's actual rendered (CSS pixel) width,
+    // which rarely equals plotWidth (its SVG viewBox-unit width) -- the
+    // chart scales to fill its container via width="100%", so dividing
+    // the pixel offset by the viewBox width picks the wrong point
+    // whenever the two differ.
+    const nearest = points.length <= 1 ? 0 : Math.round((x / rect.width) * (points.length - 1));
     setHoverIndex(Math.min(Math.max(nearest, 0), points.length - 1));
   }
 
