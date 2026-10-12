@@ -1,0 +1,196 @@
+# Self-hosted deploy (API + Postgres + ingest)
+
+The web app stays on Vercel. This covers the API, its database, and the
+periodic ingest job on the same Ubuntu box that already runs another app
+(different ports, different domain, same Cloudflare Tunnel), reached through
+that tunnel so **no inbound port is ever opened**.
+
+```
+browser ─▶ Vercel (static)
+                     │ fetch() straight to the API (CORS-open)
+                     ▼
+            Cloudflare edge
+                     │  tunnel, outbound-only
+                     ▼
+   your server: cloudflared ─▶ nginx 127.0.0.1:8090 ─▶ API :3011
+                                                           │
+                                                           ▼
+                                              Postgres on localhost
+                                           (same cluster as the other app)
+```
+
+No blue/green here — this is a read-mostly API fed by a periodic ingest, not
+a live interactive service, so a deploy is: stop, swap code, apply schema,
+start, wait for `/api/status`. A few seconds of downtime per deploy.
+
+## Files
+
+| File | Runs | Purpose |
+|---|---|---|
+| `bootstrap.sh` | once, on the server as root | new service user, new Postgres role/db, scoped sudo |
+| `configure.sh` | on the server, re-appliable | nginx site, API systemd service, **ingest systemd timer (every 4h)** |
+| `release.sh` | on the server, per deploy | swap release, apply schema, restart, health check |
+| `render-env.mjs` | in CI | builds `.env` from `.env.example` + GitHub secrets |
+| `../.github/workflows/deploy-api.yml` | GitHub Actions | build, ship, activate |
+
+## One-time setup
+
+### 1. Bootstrap the server
+
+This box already has Node, nginx, cloudflared, Postgres, ufw and fail2ban
+set up for another app — `bootstrap.sh` only adds what's new for this one
+(a dedicated `rspluginpulse` user, a new Postgres role/database in the
+existing cluster, its own nginx site and systemd units). It does **not**
+touch the firewall, re-tune Postgres, or re-run global setup, since doing
+that on a shared box risks breaking the other app.
+
+```bash
+git clone <your repo> /tmp/rspluginpulse && cd /tmp/rspluginpulse
+sudo bash deploy/bootstrap.sh
+```
+
+Idempotent — safe to re-run. It generates the database password itself and
+writes the connection string to `/srv/rspluginpulse/shared/database_url`.
+**That value never goes to GitHub.**
+
+### 2. Cloudflare Tunnel
+
+Reuses the same tunnel/cloudflared install as the other app — just add a
+second public hostname to it (Zero Trust → Networks → Tunnels → your
+tunnel → Public Hostname):
+
+| Field | Value |
+|---|---|
+| Subdomain | `api` |
+| Domain | `rspluginpulse.com` |
+| Service | `http://127.0.0.1:8090` |
+
+### 3. Deploy key
+
+```bash
+sudo -u rspluginpulse ssh-keygen -t ed25519 -f ./rspluginpulse_deploy -N '' -C 'github-actions'
+sudo tee -a /srv/rspluginpulse/.ssh/authorized_keys < ./rspluginpulse_deploy.pub
+sudo chown rspluginpulse:rspluginpulse /srv/rspluginpulse/.ssh/authorized_keys
+sudo chmod 600 /srv/rspluginpulse/.ssh/authorized_keys
+ssh-keyscan -H <SERVER_IP>        # for SSH_KNOWN_HOSTS
+```
+
+Put the private half in the `SSH_PRIVATE_KEY` secret, then delete your local
+copy.
+
+### 4. GitHub configuration
+
+**Secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `SSH_HOST` | server IP or hostname |
+| `SSH_USER` | `rspluginpulse` |
+| `SSH_PRIVATE_KEY` | private half of the deploy key |
+| `SSH_KNOWN_HOSTS` | output of `ssh-keyscan -H <SERVER_IP>` |
+| `SSH_PORT` | only if not 22 |
+| `DISCORD_WEBHOOK_URL` | optional — ingest failure alerts |
+| `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` / `R2_PREFIX` | optional — only if moving the embed-card cache off local disk |
+
+**Variables** (not secrets):
+
+| Variable | Value |
+|---|---|
+| `API_PUBLIC_URL` | `https://api.rspluginpulse.com` — enables the post-deploy public health check |
+
+### 5. Vercel
+
+Import `packages/web` as its own Vercel project (set the project's root
+directory to `packages/web`). `vercel.json` already points the build at
+`https://api.rspluginpulse.com` and sets the CSP/cache headers — nothing
+else to configure. Vercel deploys on every push via its own GitHub
+integration, independent of the Actions workflow above.
+
+## How a deploy works
+
+Push to `main` (touching `packages/db`, `packages/api`, `packages/ingest`,
+or `deploy/`), then:
+
+1. CI installs, builds the API (`next build`)
+2. Bundles `node_modules` + each workspace's source + `deploy/` into a
+   release tarball — no separate install step needed on the server
+3. Renders `.env` and uploads both to the server
+4. `release.sh` applies `schema.sql` (idempotent — `CREATE ... IF NOT
+   EXISTS` throughout, no migration framework needed), swaps the `current`
+   symlink, restarts the service
+5. Polls `/api/status` until it answers (up to 30s)
+6. If it never answers, the release stops there and CI fails with the new
+   process's logs — the **old** release's files are still on disk (nothing
+   is deleted until a later successful deploy prunes it), but the service
+   itself is left stopped, so that failure is loud rather than silently
+   serving stale code. Re-run the previous commit's workflow to redeploy it.
+
+Pruning keeps the last 5 releases in `/srv/rspluginpulse/releases`.
+
+## The ingest timer
+
+This is the actual "every few hours" automation: `configure.sh` installs a
+systemd timer that runs both `npm run ingest` and `npm run ingest:runelite`
+every 4 hours (`OnUnitActiveSec=4h` — see `INGEST_INTERVAL` in
+`configure.sh` to change it), starting 5 minutes after boot. Output goes to
+the journal, not a separate log file:
+
+```bash
+systemctl list-timers rspluginpulse-ingest   # see when it last/next ran
+journalctl -u rspluginpulse-ingest -f        # watch it run
+sudo systemctl start rspluginpulse-ingest    # run it right now
+```
+
+If either ingest throws, it posts to `DISCORD_WEBHOOK_URL` itself (see
+`packages/ingest/src/discordNotify.ts`) — the timer doesn't need its own
+alerting on top of that.
+
+## Rollback
+
+Releases are kept, so roll back by re-running against an older one:
+
+```bash
+ssh rspluginpulse@<host>
+ls -lt /srv/rspluginpulse/releases
+bash /srv/rspluginpulse/releases/<older-sha>/deploy/release.sh <older-sha>
+```
+
+This re-applies that release's `schema.sql` too, which is harmless since
+it's additive-only. It won't undo a change that isn't additive — there
+isn't one yet, but if a future schema change needs to drop or rename
+something, split it into expand (deploy, add the new thing) and contract
+(a later deploy removes the old) the same way the other app on this box
+does, or a rollback here will fail against the newer schema.
+
+## Security posture
+
+Same box, same posture as the other app already set up: no inbound ports
+except SSH (the tunnel dials out), Postgres and nginx both bind to
+loopback, the service user has no password and a locked account, sudo is
+restricted to the exact systemctl/nginx commands `release.sh` needs, and
+systemd hardening (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`,
+writable only under `/srv/rspluginpulse`).
+
+## Checking on it
+
+```bash
+systemctl status rspluginpulse-api
+journalctl -u rspluginpulse-api -f
+curl -s localhost:8090/api/status | jq
+systemctl list-timers rspluginpulse-ingest
+```
+
+## Not set up yet (by design — see the deploy scoping decision)
+
+- **No automated backups.** The snapshot history is re-derivable from
+  mod.io/RuneLite if ever lost (unlike, say, a credential that never
+  rotates) — not zero-cost to lose, but not urgent enough to need the
+  nightly-pg_dump-to-R2 machinery the other app on this box has. Add it
+  later by copying that app's `rs3-backup` pattern if the history grows
+  valuable enough to want.
+- **No GoAccess traffic dashboard.** Cloudflare's own dashboard already
+  gives request counts/bandwidth/geography for free; add a per-endpoint
+  panel later the same way if it's ever actually needed.
+- **No blue/green.** A deploy has a few seconds of downtime. Fine for a
+  read-mostly API with no live interactive traffic; revisit if that stops
+  being true.

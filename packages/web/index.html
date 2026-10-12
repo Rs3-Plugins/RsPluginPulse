@@ -37,10 +37,7 @@
     </script>
   </head>
   <body>
-    <script>
-      document.documentElement.setAttribute("data-theme", localStorage.getItem("theme") === "light" ? "light" : "dark");
-      document.documentElement.setAttribute("data-game", localStorage.getItem("game") === "osrs" ? "osrs" : "rs3");
-    </script>
+    <script src="/theme-init.js"></script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
