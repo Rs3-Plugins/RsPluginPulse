@@ -4,12 +4,16 @@ export interface PickerItem {
   id: number;
   name: string;
   sub: string;
+  // Optional, additive: callers that only pick a plain id (the badge/embed
+  // builders) ignore this. A navigational search needs to know which kind
+  // of page to go to, which onChange's second argument carries.
+  kind?: string;
 }
 
 interface Props {
   items: PickerItem[];
   value: number | null;
-  onChange: (id: number) => void;
+  onChange: (id: number, item: PickerItem) => void;
   placeholder: string;
   loading?: boolean;
 }
@@ -50,8 +54,8 @@ export function PluginAuthorPicker({ items, value, onChange, placeholder, loadin
     setDropUp(window.innerHeight - rect.bottom < 320);
   }, [open]);
 
-  function pick(id: number) {
-    onChange(id);
+  function pick(item: PickerItem) {
+    onChange(item.id, item);
     setOpen(false);
   }
 
@@ -68,7 +72,7 @@ export function PluginAuthorPicker({ items, value, onChange, placeholder, loadin
     } else if (e.key === "Enter") {
       e.preventDefault();
       const item = filtered[highlight];
-      if (item) pick(item.id);
+      if (item) pick(item);
     }
   }
 
@@ -101,7 +105,7 @@ export function PluginAuthorPicker({ items, value, onChange, placeholder, loadin
                 type="button"
                 className={`picker-row ${i === highlight ? "highlight" : ""}`}
                 onMouseEnter={() => setHighlight(i)}
-                onClick={() => pick(item.id)}
+                onClick={() => pick(item)}
               >
                 <span className="picker-row-main">
                   <span className="picker-row-name">{item.name}</span>

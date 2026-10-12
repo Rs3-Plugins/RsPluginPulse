@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useGame, type Game } from "../context/GameContext";
 import { getRandomPlugin, getStatus } from "../api";
 import { GameSwitcher, VISIBLE_GAMES } from "./GameSwitcher";
+import { HeaderSearch } from "./HeaderSearch";
 
 type Theme = "dark" | "light";
 
@@ -103,6 +104,8 @@ export function Header() {
               </Link>
             ))}
           </nav>
+
+          <HeaderSearch />
         </div>
 
         <div className="header-controls">

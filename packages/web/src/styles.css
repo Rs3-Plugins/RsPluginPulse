@@ -496,6 +496,11 @@ body {
   gap: 10px 18px;
 }
 
+.header-search {
+  width: 240px;
+  flex: none;
+}
+
 .menu-toggle {
   display: none;
 }
@@ -506,6 +511,10 @@ body {
   }
 
   .header-controls-desktop {
+    display: none;
+  }
+
+  .header-search {
     display: none;
   }
 

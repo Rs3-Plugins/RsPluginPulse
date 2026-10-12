@@ -256,11 +256,13 @@ export async function renderCardSvg(type: EmbedCardType, entityId: number, optio
   const height = y + PAD;
   const subtitleText = options.showSubtitle ? `<text x="${nameX}" y="50" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="12" fill="${pal.muted}">${escapeXml(sub)}</text>` : "";
 
+  // The top accent "bar" is actually the card outline's own top-left/
+  // top-right quarter-circle corners (radius 10, matching the card rect
+  // below) traced as a stroked path, not a clipped rect: a 2-3px-tall
+  // sliver of a 10px-radius curve reads as a near-straight diagonal
+  // rather than a rounded corner, so it needs the full quarter-arc.
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" font-variant-numeric="tabular-nums">
   <defs>
-    <clipPath id="cardShape">
-      <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="10" />
-    </clipPath>
     <linearGradient id="goldFade" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="${pal.gold}" stop-opacity="0" />
       <stop offset="12%" stop-color="${pal.gold}" stop-opacity="1" />
@@ -269,7 +271,8 @@ export async function renderCardSvg(type: EmbedCardType, entityId: number, optio
     </linearGradient>
   </defs>
   <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="10" fill="${pal.bg}" stroke="${pal.border}" />
-  <rect x="0" y="0" width="${width}" height="4" fill="url(#goldFade)" clip-path="url(#cardShape)" />
+  <path d="M 0.5 10.5 A 10 10 0 0 1 10.5 0.5 L ${width - 10.5} 0.5 A 10 10 0 0 1 ${width - 0.5} 10.5"
+        fill="none" stroke="url(#goldFade)" stroke-width="2.5" stroke-linecap="round" />
   ${icon}
   <text x="${nameX}" y="32" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="16" font-weight="700" fill="${pal.text}">${escapeXml(name)}</text>
   ${subtitleText}
