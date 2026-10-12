@@ -1,0 +1,181 @@
+# RuneScape PluginPulse — Discord Bot
+
+Planning doc only. Nothing here is built yet — this is the brief for designing
+and implementing the bot, written up so a fresh session has full context
+without re-deriving it from scratch.
+
+## Pitch
+
+A Discord bot server owners install that brings PluginPulse's stats into their
+server: slash commands to look up a plugin or author, automatic alerts when
+something they're watching spikes or drops, channel descriptions that stay
+live with a plugin's current numbers, and a web dashboard (Discord login,
+pick a server, configure everything visually) instead of juggling slash
+command flags for every setting.
+
+## Feature breakdown
+
+### Slash commands
+
+- `/plugin <name>` — looks up a plugin by name/slug (reuse `/api/search` for
+  autocomplete), replies with an embed built the same way `/api/card`
+  renders its PNG: name, author, installs/downloads, subscribers, rank,
+  sparkline if feasible in an embed image.
+- `/author <name>` — same idea for an author: plugin count, total
+  installs/downloads, rank, their plugin list.
+- `/rank <plugin|author> <name>` — just the current leaderboard position,
+  terser than the full card.
+- `/leaderboard <plugins|authors> [period]` — top N for a period (alltime /
+  hot / weekly / monthly), mirrors the site's leaderboard tabs.
+- `/myplugins` — pulls up the stats for whichever author account the
+  Discord user has linked (see **Account linking** below) as an embed, so an
+  author can check their own numbers without leaving Discord.
+- `/link <author-id-or-slug>` — starts the account-linking flow.
+- Admin-only, scoped to users with `Manage Server`:
+  - `/watch add <plugin|author> <name> [threshold]` — start alerting this
+    channel on big moves for that entity.
+  - `/watch remove <plugin|author> <name>`
+  - `/watch list`
+  - `/channel-stats set <channel> <template>` — see **Channel description
+    templates**.
+  - `/channel-stats remove <channel>`
+  - Anything genuinely visual (embed design, picking which fields show)
+    should push the admin to the dashboard rather than trying to build a
+    form out of slash command options — Discord's command UI doesn't do
+    multi-field visual design well.
+
+### Notifications (big drop / increase)
+
+- Per-guild, per-channel watchlist of plugins/authors (`/watch add` above,
+  or set from the dashboard).
+- Piggybacks on the existing hourly ingest cadence — there's no faster
+  signal to react to than that anyway (phyce's own data doesn't update more
+  than hourly either, same reasoning as the ingest interval itself).
+- Needs a concrete definition of "big": percentage change since the last
+  snapshot, with a sensible default (e.g. ±15%) and an optional per-watch
+  override set via the threshold argument. Should also debounce — a plugin
+  oscillating right around the threshold every hour shouldn't spam the
+  channel hourly.
+- Delivered as a webhook post or a bot message with an embed: what changed,
+  by how much, old vs new number, link back to the plugin/author page.
+
+### Channel description templates
+
+- Admins set a Discord channel's **topic** (not the channel name — name
+  edits are far more rate-limited and character-restricted) to a template
+  string containing placeholders: `{installs}`, `{rank}`, `{subscribers}`,
+  bound to one plugin or author.
+- Re-rendered on the same hourly cadence as ingest/notifications.
+- **Hard constraint to design around:** Discord rate-limits channel
+  name/topic edits to roughly 2 per 10 minutes per channel. Hourly updates
+  are comfortably under that, but the design needs to queue/stagger updates
+  across many channels rather than firing them all at once when the ingest
+  tick lands, and needs to just skip (not retry-storm) a channel whose
+  topic hasn't actually changed since last time.
+- Template placeholders should reuse whatever formatting the site already
+  uses (`compact()`-style "414k" rather than raw big numbers) for
+  consistency with cards/badges.
+
+### Custom embed design
+
+- A visual builder in the dashboard (title, description, color, thumbnail,
+  fields, footer) bound to the same placeholder vocabulary as channel
+  templates, with a live preview rendered against a real plugin/author's
+  current data.
+- Saved per-guild (or per-command, if a guild wants different looks for
+  `/plugin` vs a watch-alert embed) and referenced by the bot process when
+  it actually builds the Discord embed payload.
+- `og:image`/card reuse: the existing `/api/card/{type}/{key}.png` endpoint
+  already renders a nice visual stats card — worth considering as a default
+  embed image/thumbnail option before building a from-scratch image
+  generator for this.
+
+### Dashboard flow
+
+1. **"Add to Discord"** — standard Discord OAuth2 bot-install flow
+   (`bot` + `applications.commands` scopes). Discord's own consent screen
+   lets the user pick which server to install into; nothing custom needed
+   for that part.
+2. **"Log in with Discord"** — a *separate* OAuth2 flow (`identify` +
+   `guilds` scopes) so the dashboard knows who's logged in and can filter
+   to servers where the bot is installed *and* the logged-in user has
+   `Manage Server` there.
+3. **Server picker** — after login, list those servers, click into one.
+4. **Per-server settings page** — watchlist (add/remove/thresholds),
+   channel-description bindings, the embed designer, and an overview of
+   which Discord users have linked an author account in this server (admin
+   visibility, not edit).
+
+### Account linking (for `/myplugins`)
+
+Needs a concrete decision before building: how does a Discord user prove
+they own a given mod.io/RuneLite author identity?
+
+- **Low-friction option:** `/link <author-id-or-slug>` just takes it on
+  trust — since this only grants *read* access to already-public stats
+  (nothing an unlinked person couldn't already see via `/author`), the
+  actual risk of a false claim is low. Simplest to ship first.
+- **Verified option:** generate a one-time code the user has to place
+  somewhere provably theirs (mod.io profile bio, a specific RuneLite plugin
+  hub manifest field) before `/link` accepts it. More trustworthy, more
+  friction, more to build.
+- Could ship the low-friction version first and revisit if it's ever
+  actually abused.
+
+## Suggested architecture
+
+Fits the existing monorepo's pattern of one package per concern
+(`packages/db`, `packages/api`, `packages/ingest`, `packages/web`):
+
+- **`packages/discord-bot`** — the long-running bot process (discord.js),
+  registers slash commands, handles interactions, runs the
+  notification/channel-template tick on the same hourly cadence as ingest.
+  Deployed as its own systemd service on the existing VPS, same pattern as
+  `rspluginpulse-ingest` (see `deploy/README.md`) — `configure.sh` already
+  shows the template for adding a new systemd unit.
+- **`packages/dashboard`** (or extend `packages/api` directly, since it's
+  already Next.js and already has session-adjacent concerns like CORS) —
+  the OAuth login + per-server settings UI. Needs real session storage
+  (cookies + a sessions table, or a signed-JWT approach) that the current
+  purely-public, no-auth API doesn't have at all yet.
+- **`packages/db` additions** — new tables: guild settings, per-guild
+  watchlist entries, channel-template bindings, embed configs, and
+  Discord-user-to-author links. All net-new; nothing about the existing
+  schema needs to change for this.
+- **Reuses as-is:** every existing public API endpoint
+  (`/api/plugins/{id}`, `/api/authors/{id}`, `/api/card/...`,
+  `/api/badge/...`, `/api/resolve/...`, `/api/leaderboard/...`,
+  `/api/search`) — the bot and dashboard are just another API consumer,
+  same as the web app. The slug-or-id support already built in means the
+  bot can take a human-typed plugin name straight to `/api/resolve/...`
+  without any bot-side lookup logic of its own.
+
+## Open questions for the design pass
+
+- Percentage-change threshold default, and whether "big increase" and "big
+  drop" should have independent thresholds.
+- Whether notifications should also cover *new release* / *author's first
+  plugin* events, not just existing-entity stat swings.
+- Free vs premium tiering (e.g. cap watchlist size or channel-template
+  count on a free tier) — only relevant if this is meant to be
+  cost-sustaining; skip entirely if not.
+- Whether the bot should support both RuneScape and RuneLite entities in
+  the same guild (almost certainly yes, same as the site), and how a guild
+  picks a default game for ambiguous commands like `/leaderboard`.
+- Discord bot verification: at 75+ servers Discord requires bot
+  verification (privacy policy, ToS, review) — worth knowing the threshold
+  exists even if it's not a v1 concern.
+
+## Suggested phasing
+
+1. **MVP:** `/plugin`, `/author`, `/leaderboard`, `/rank` — read-only
+   commands, no dashboard, no notifications. Proves out the bot process and
+   Discord API integration against the existing public API with the least
+   new infrastructure (no auth, no new DB tables beyond maybe nothing at
+   all).
+2. **Notifications + channel templates:** needs the new DB tables and the
+   hourly tick worker, still no dashboard (configure via slash commands
+   only).
+3. **Dashboard:** OAuth login, server picker, visual settings for
+   everything phase 2 added via slash commands, plus the embed designer.
+4. **Account linking + `/myplugins`:** lowest-friction version first.
