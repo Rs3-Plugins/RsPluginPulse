@@ -15,8 +15,8 @@ function readStoredTheme(): Theme {
 
 const NAV_LINKS: { to: string; label: string; match: (path: string) => boolean }[] = [
   { to: "/", label: "Leaderboard", match: (p) => p === "/" },
-  { to: "/stats", label: "Stats", match: (p) => p.startsWith("/stats") },
   { to: "/compare", label: "Compare", match: (p) => p.startsWith("/compare") },
+  { to: "/stats", label: "Stats", match: (p) => p.startsWith("/stats") },
   { to: "/api", label: "API", match: (p) => p.startsWith("/api") },
 ];
 
@@ -39,6 +39,10 @@ export function Header() {
     ]);
     setRolling(false);
     if (result) navigate(pluginHref(result.nameId, game));
+  }
+
+  function toggleTheme() {
+    setTheme(theme === "dark" ? "light" : "dark");
   }
 
   useEffect(() => {
@@ -85,51 +89,81 @@ export function Header() {
   }, [menuOpen]);
 
   return (
-    <header className="site-header" ref={menuRef}>
-      <div className="site-header-inner">
-        <div className="brand-group">
-          <Link to="/" className="brand-link">
-            <img src="/logo/icon-2a-hex.svg" alt="" className="brand-icon" />
-            <span className="brand-text brand-font">
-              <span className="brand-eyebrow">{brandEyebrow(game)}</span>
-              <span className="brand-name">
-                Plugin<span className="brand-pulse">Pulse</span>
-              </span>
+    <header className="pp-hdr" ref={menuRef}>
+      <div className="pp-hdr__row">
+        <Link to="/" className="pp-brand">
+          <img src="/logo/icon-2a-hex.svg" alt="" width={34} height={34} className="pp-brand__icon" />
+          <span className="pp-brand__text brand-font">
+            <span className="pp-brand__eyebrow">{brandEyebrow(game)}</span>
+            <span className="pp-brand__name">
+              Plugin<span>Pulse</span>
             </span>
-          </Link>
+          </span>
+        </Link>
 
-          <nav className="primary-nav" aria-label="Primary">
-            {NAV_LINKS.map((link) => (
-              <Link key={link.to} to={link.to} className={`primary-nav-link ${link.match(location.pathname) ? "active" : ""}`}>
-                {link.label}
-              </Link>
-            ))}
-          </nav>
-        </div>
+        <nav className="pp-nav" aria-label="Main">
+          {NAV_LINKS.map((link) => (
+            <Link key={link.to} to={link.to} className="pp-nav__tab" aria-current={link.match(location.pathname) ? "page" : undefined}>
+              {link.label}
+            </Link>
+          ))}
+        </nav>
 
-        <div className="header-controls">
+        <div className="pp-actions">
+          <a
+            className="pp-discord"
+            href="https://discord.gg/gHN7c9B5FU"
+            target="_blank"
+            rel="noopener"
+            title="Join the PluginPulse Discord"
+            aria-label="Join the PluginPulse Discord"
+          >
+            <PlusIcon />
+            <span className="pp-discord__long">Join Discord</span>
+            <span className="pp-discord__short">Discord</span>
+          </a>
+          <span className="pp-divider" aria-hidden="true" />
+
           <HeaderSearch />
 
-          <button className="theme-toggle randomizer-btn" onClick={handleRandomize} disabled={rolling}>
+          <button className="pp-ghost" onClick={handleRandomize} disabled={rolling} title="Open a random plugin">
             <DiceIcon rolling={rolling} />
             {rolling ? "Rolling…" : "Randomizer"}
           </button>
 
-          <div className="header-controls-desktop">
-            <GameSwitcher updatedLabel={updatedLabel} sourceLabel={dataSourceLabel(game)} />
+          <GameSwitcher updatedLabel={updatedLabel} sourceLabel={dataSourceLabel(game)} />
 
-            <button
-              className="theme-icon-btn"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            >
-              <ThemeIcon theme={theme} />
-            </button>
-          </div>
+          <a
+            className="pp-ghost pp-ghost--icon"
+            href="https://ko-fi.com/mark7625"
+            target="_blank"
+            rel="noopener"
+            title="Buy me a coffee"
+            aria-label="Support PluginPulse — buy me a coffee"
+          >
+            <CoffeeIcon />
+          </a>
 
           <button
-            className="theme-icon-btn menu-toggle"
+            className="pp-ghost pp-ghost--icon"
+            onClick={toggleTheme}
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            <ThemeIcon theme={theme} />
+          </button>
+        </div>
+
+        <div className="pp-mobile">
+          <HeaderSearch />
+
+          <button className="pp-round pp-round--label" onClick={handleRandomize} disabled={rolling} aria-label="Open a random plugin">
+            <DiceIcon rolling={rolling} />
+            <span>Randomizer</span>
+          </button>
+
+          <button
+            className="pp-round"
             onClick={() => setMenuOpen((o) => !o)}
             aria-label={menuOpen ? "Close menu" : "Open menu"}
             aria-expanded={menuOpen}
@@ -141,17 +175,35 @@ export function Header() {
       <div className="rune-band" />
 
       {menuOpen && (
-        <div className="mobile-menu">
-          <nav className="mobile-nav" aria-label="Primary">
+        <div className="pp-drawer">
+          <nav className="pp-drawer__nav" aria-label="Main">
             {NAV_LINKS.map((link) => {
               const active = link.match(location.pathname);
               return (
-                <Link key={link.to} to={link.to} className={`mobile-nav-link ${active ? "active" : ""}`}>
+                <Link key={link.to} to={link.to} className="pp-drawer__item" aria-current={active ? "page" : undefined}>
                   {link.label}
-                  {active && <span className="mobile-nav-dot" />}
+                  {active && <span className="pp-dot" />}
                 </Link>
               );
             })}
+            <a className="pp-drawer__discord" href="https://discord.gg/gHN7c9B5FU" target="_blank" rel="noopener">
+              <span className="pp-drawer__plus">
+                <PlusIcon />
+              </span>
+              <span>
+                <b>Join Discord</b>
+                <small>Chat with the PluginPulse community</small>
+              </span>
+            </a>
+            <a className="pp-drawer__discord pp-drawer__coffee" href="https://ko-fi.com/mark7625" target="_blank" rel="noopener">
+              <span className="pp-drawer__plus">
+                <CoffeeIcon />
+              </span>
+              <span>
+                <b>Buy me a coffee</b>
+                <small>Help keep PluginPulse running</small>
+              </span>
+            </a>
           </nav>
 
           <div className="mobile-menu-section">
@@ -185,13 +237,31 @@ export function Header() {
                 {dataSourceLabel(game)} · {updatedLabel}
               </span>
             )}
-            <button className="theme-toggle" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+            <button className="theme-toggle" onClick={toggleTheme}>
               {theme === "dark" ? "Light mode" : "Dark mode"}
             </button>
           </div>
         </div>
       )}
     </header>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M6 1.5v9M1.5 6h9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CoffeeIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2.5 6.5h9v3.5a3 3 0 01-3 3h-3a3 3 0 01-3-3V6.5Z" />
+      <path d="M11.5 7h1a1.8 1.8 0 010 3.6h-1" />
+      <path d="M5.2 4.3c-.4-.5-.4-1 0-1.6M7.8 4.3c-.4-.5-.4-1 0-1.6" />
+    </svg>
   );
 }
 
@@ -226,15 +296,15 @@ function ThemeIcon({ theme }: { theme: Theme }) {
 
 function MenuIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-      <path d="M2 4.5h12M2 8h12M2 11.5h12" />
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+      <path d="M3 5h12M3 9h12M3 13h12" />
     </svg>
   );
 }
 
 function CloseIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
       <path d="M3 3l10 10M13 3L3 13" />
     </svg>
   );

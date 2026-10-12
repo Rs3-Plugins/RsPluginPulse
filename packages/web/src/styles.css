@@ -188,93 +188,91 @@ body {
   font-family: "Marcellus SC", serif;
 }
 
-.site-header {
+.pp-hdr {
   position: relative;
   background: var(--hdrBg);
   border-bottom: 1px solid var(--line2);
 }
 
-.site-header-inner {
+.pp-hdr__row {
   max-width: 1200px;
   margin: 0 auto;
+  box-sizing: border-box;
   padding: 12px clamp(14px, 4vw, 32px);
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
 }
 
-.brand-group {
-  display: flex;
-  align-items: center;
-  gap: 22px;
-  flex-wrap: wrap;
-}
-
-.brand-link {
+.pp-brand {
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-right: 8px;
+  flex: none;
 }
 
-.brand-link:hover {
+.pp-brand:hover {
   color: var(--text);
 }
 
-.primary-nav {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.primary-nav-link {
-  height: 36px;
-  padding: 0 12px;
-  display: inline-flex;
-  align-items: center;
-  border: 0;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.primary-nav-link:hover {
-  color: var(--text);
-}
-
-.primary-nav-link.active {
-  background: rgba(202, 164, 77, 0.12);
-  box-shadow: inset 0 -2px 0 var(--gold);
-  color: var(--goldHi);
-  cursor: default;
-}
-
-.brand-icon {
-  width: 40px;
-  height: 40px;
+.pp-brand__icon {
+  display: block;
   flex-shrink: 0;
 }
 
-.brand-text {
+.pp-brand__text {
   display: flex;
   flex-direction: column;
+  gap: 4px;
   line-height: 1.1;
 }
 
-.brand-eyebrow {
+.pp-brand__eyebrow {
   font-size: 10px;
   letter-spacing: 0.45em;
   color: var(--gold);
 }
 
-.brand-name {
-  font-size: 22px;
+.pp-brand__name {
+  font-size: 20px;
+  color: var(--text);
 }
 
-.brand-name .brand-pulse {
+.pp-brand__name span {
   color: var(--goldHi);
+}
+
+.pp-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pp-nav__tab {
+  height: 32px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.pp-nav__tab:hover {
+  color: var(--text);
+}
+
+.pp-nav__tab[aria-current="page"] {
+  color: var(--goldHi);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--gold);
+  cursor: default;
 }
 
 .rune-band {
@@ -292,17 +290,6 @@ body {
   padding: 0 14px;
   font-size: 13px;
   cursor: pointer;
-}
-
-.randomizer-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.randomizer-btn:disabled {
-  cursor: default;
-  opacity: 0.8;
 }
 
 .dice-icon {
@@ -337,13 +324,6 @@ body {
   border-color: var(--gold);
 }
 
-.header-controls {
-  display: flex;
-  align-items: center;
-  gap: 10px 18px;
-  flex-wrap: wrap;
-}
-
 .game-icon {
   display: block;
   flex: none;
@@ -362,20 +342,22 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid var(--line2);
-  background: var(--surface2);
+  padding: 0 8px 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: var(--text);
   font-family: inherit;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .game-switcher-trigger:hover,
 .game-switcher-trigger.open {
-  border-color: var(--gold);
+  background: var(--hover);
+  color: var(--goldHi);
 }
 
 .game-switcher-chevron {
@@ -471,46 +453,168 @@ body {
   color: var(--dim);
 }
 
-.theme-icon-btn {
-  width: 32px;
-  height: 32px;
+/* right-hand action group: Discord, search, randomizer, game switcher,
+   coffee link, theme toggle -- collapses entirely into .pp-mobile below
+   1000px rather than wrapping, since there isn't room to wrap it nicely. */
+.pp-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex: none;
-  display: flex;
+}
+
+.pp-divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--line2);
+  flex: none;
+}
+
+.pp-discord {
+  height: 32px;
+  padding: 0 6px;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  border: 1px solid var(--line2);
-  background: var(--surface2);
-  color: var(--muted);
-  cursor: pointer;
+  gap: 6px;
+  border-radius: 6px;
+  color: var(--goldHi);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.theme-icon-btn:hover {
-  color: var(--text);
-  border-color: var(--gold);
+.pp-discord:hover {
+  background: var(--hover);
 }
 
-.header-controls-desktop {
-  display: flex;
-  align-items: center;
-  gap: 10px 18px;
-}
-
-.menu-toggle {
+.pp-discord__short {
   display: none;
 }
 
-@media (max-width: 860px) {
-  .primary-nav {
+/* generic transparent icon/text button shared by the randomizer, coffee
+   link, and theme toggle -- same base .game-switcher-trigger already
+   matches this visually, just not sharing the class since it's a
+   separate component. */
+.pp-ghost {
+  height: 32px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.pp-ghost:hover {
+  background: var(--hover);
+  color: var(--goldHi);
+}
+
+.pp-ghost:disabled {
+  cursor: default;
+  opacity: 0.8;
+}
+
+.pp-ghost--icon {
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+}
+
+/* mobile top bar (<1000px): three round icon buttons replace the whole
+   .pp-actions group -- see the breakpoints below. */
+.pp-mobile {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.pp-round {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.pp-round[aria-expanded="true"] {
+  border-color: var(--gold);
+  color: var(--goldHi);
+}
+
+.pp-round--label {
+  width: auto;
+  padding: 0 14px;
+}
+
+.pp-round:disabled {
+  cursor: default;
+  opacity: 0.8;
+}
+
+/* the mobile search trigger is HeaderSearch's own .pp-search-btn (it
+   already renders the icon-only variant below 1080px, same component used
+   on desktop) -- resized here to match the round button styling of its
+   .pp-mobile siblings instead of its default inline-row treatment. */
+.pp-mobile .pp-search-btn {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line2);
+  border-radius: 999px;
+}
+
+@media (max-width: 1239px) {
+  .pp-discord__long {
     display: none;
   }
+  .pp-discord__short {
+    display: inline;
+  }
+}
 
-  .header-controls-desktop {
+@media (max-width: 999px) {
+  .pp-nav,
+  .pp-actions {
     display: none;
   }
-
-  .menu-toggle {
+  .pp-mobile {
     display: flex;
+  }
+}
+
+@media (max-width: 419px) {
+  .pp-round--label {
+    width: 40px;
+    padding: 0;
+  }
+  .pp-round--label span {
+    display: none;
+  }
+}
+
+@media (min-width: 1000px) {
+  .pp-drawer {
+    display: none !important;
   }
 }
 
@@ -956,7 +1060,7 @@ body {
   }
 }
 
-.mobile-menu {
+.pp-drawer {
   position: absolute;
   top: 100%;
   left: 0;
@@ -965,36 +1069,83 @@ body {
   background: var(--hdrBg);
   border-bottom: 1px solid var(--line2);
   box-shadow: var(--shadow);
-  padding: 4px clamp(14px, 4vw, 32px) 18px;
+  padding: 0 clamp(14px, 4vw, 32px) 18px;
   max-height: calc(100vh - 64px);
   overflow-y: auto;
 }
 
-.mobile-nav {
+.pp-drawer__nav {
   display: flex;
   flex-direction: column;
+  border-top: 1px solid var(--line);
 }
 
-.mobile-nav-link {
+.pp-drawer__item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 2px;
+  height: 50px;
+  padding: 0 2px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
   font-size: 15px;
   font-weight: 600;
-  color: var(--text);
-  border-bottom: 1px solid var(--line);
 }
 
-.mobile-nav-link.active {
+.pp-drawer__item[aria-current="page"] {
   color: var(--goldHi);
 }
 
-.mobile-nav-dot {
+.pp-dot {
   width: 6px;
   height: 6px;
   border-radius: 999px;
   background: var(--gold);
+}
+
+.pp-drawer__discord {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--line);
+  text-decoration: none;
+}
+
+.pp-drawer__plus {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--gold);
+  border-radius: 999px;
+  color: var(--goldHi);
+}
+
+.pp-drawer__discord b {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--goldHi);
+}
+
+.pp-drawer__discord small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.pp-drawer__coffee .pp-drawer__plus {
+  border: 1px solid var(--line2);
+  color: var(--muted);
+}
+
+.pp-drawer__coffee b {
+  color: var(--text);
 }
 
 .mobile-menu-section {
