@@ -105,6 +105,12 @@ export function PluginTrend() {
       .catch((err) => setError(String(err)));
   }, [id, setGame]);
 
+  const allTimeRank = useMemo(() => {
+    if (!allPlugins || !plugin) return null;
+    const index = allPlugins.findIndex((p) => p.id === plugin.id);
+    return index === -1 ? null : index + 1;
+  }, [allPlugins, plugin]);
+
   const similarPlugins = useMemo(() => {
     if (!allPlugins || !plugin) return [];
     return allPlugins
@@ -328,6 +334,7 @@ export function PluginTrend() {
           <div className="author-profile-info">
             <div className="author-profile-title">
               <h1 className="brand-font">{plugin.name}</h1>
+              {allTimeRank !== null && <span className="rank-badge">#{allTimeRank} all-time</span>}
               {hotRank !== null && <span className="hot-now-badge">#{hotRank} HOT NOW</span>}
               <a href={plugin.profileUrl} target="_blank" rel="noopener" className="author-mod-link">
                 {plugin.game === "runelite" ? "View on plugin hub ↗" : "View on mod.io ↗"}

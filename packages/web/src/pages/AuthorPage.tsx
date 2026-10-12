@@ -177,6 +177,7 @@ export function AuthorPage() {
           <div className="author-profile-info">
             <div className="author-profile-title">
               <h1 className="brand-font">{author.authorName}</h1>
+              {author.ranks.allTime !== null && <span className="rank-badge">#{author.ranks.allTime} all-time</span>}
               <a href={author.authorProfileUrl} target="_blank" rel="noopener" className="author-mod-link">
                 {author.game === "runelite" ? "View GitHub profile ↗" : "View mod.io profile ↗"}
               </a>
