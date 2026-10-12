@@ -1,7 +1,7 @@
 name: Run Ingest
 
 # Manual-only: run from the Actions tab (Run workflow) whenever you want a
-# fresh mod.io/RuneLite snapshot before the 4h timer on the server fires on
+# fresh mod.io/RuneLite snapshot before the 1h timer on the server fires on
 # its own. Doesn't build or ship anything -- just tells the server to run
 # whatever ingest code is already deployed there.
 on:

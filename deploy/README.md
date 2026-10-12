@@ -28,7 +28,7 @@ start, wait for `/api/status`. A few seconds of downtime per deploy.
 | File | Runs | Purpose |
 |---|---|---|
 | `bootstrap.sh` | once, on the server as root | new service user, new Postgres role/db, scoped sudo |
-| `configure.sh` | on the server, re-appliable | nginx site, API systemd service, **ingest systemd timer (every 4h)**, GoAccess traffic dashboard |
+| `configure.sh` | on the server, re-appliable | nginx site, API systemd service, **ingest systemd timer (every 1h)**, GoAccess traffic dashboard |
 | `release.sh` | on the server, per deploy | swap release, apply schema, restart, health check |
 | `render-env.mjs` | in CI | builds `.env` from `.env.example` + GitHub secrets |
 | `../.github/workflows/deploy-api.yml` | GitHub Actions | build, ship, activate |
@@ -129,11 +129,15 @@ Pruning keeps the last 5 releases in `/srv/rspluginpulse/releases`.
 
 ## The ingest timer
 
-This is the actual "every few hours" automation: `configure.sh` installs a
+This is the actual "every hour" automation: `configure.sh` installs a
 systemd timer that runs both `npm run ingest` and `npm run ingest:runelite`
-every 4 hours (`OnUnitActiveSec=4h` — see `INGEST_INTERVAL` in
-`configure.sh` to change it), starting 5 minutes after boot. Output goes to
-the journal, not a separate log file:
+every hour (`OnUnitActiveSec=1h` — see `INGEST_INTERVAL` in `configure.sh`
+to change it), starting 5 minutes after boot. 1h matches how often the
+upstream data actually moves -- mod.io's own numbers don't update faster
+than that, and phyce (the site behind the historical RuneLite backfill)
+confirmed his own aggregated figures only refresh hourly too and asked not
+to be polled more often than that. Output goes to the journal, not a
+separate log file:
 
 ```bash
 systemctl list-timers rspluginpulse-ingest   # see when it last/next ran
@@ -187,7 +191,7 @@ writable only under `/srv/rspluginpulse`).
 ## Postgres tuning
 
 The app's workload is read/query-heavy, not write-heavy: the ingest timer
-does one batch insert every 4h, but the leaderboard, search, and stats
+does one batch insert every hour, but the leaderboard, search, and stats
 pages run SELECT-only aggregation queries (window functions, per-plugin
 correlated subqueries) against a `plugin_snapshots` table that only grows.
 Postgres's defaults assume a much smaller, more balanced workload.

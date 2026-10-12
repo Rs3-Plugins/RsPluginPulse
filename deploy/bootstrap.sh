@@ -14,7 +14,7 @@
 #   - a non-login `rspluginpulse` service user owning /srv/rspluginpulse
 #   - a new Postgres role + database (in the EXISTING cluster)
 #   - nginx proxying 127.0.0.1:8090 -> the API (not public)
-#   - a systemd service for the API and a timer that runs ingest every 4h
+#   - a systemd service for the API and a timer that runs ingest every 1h
 #
 # Safe to re-run: every step checks before acting.
 set -euo pipefail

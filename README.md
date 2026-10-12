@@ -17,7 +17,7 @@ comes from RuneLite's own official endpoints (`static.runelite.net`,
 - `packages/db` — Postgres schema + query functions, shared by `api` and `ingest`.
 - `packages/ingest` — pulls the current mod/plugin list from mod.io and the
   RuneLite plugin hub and writes a snapshot of each. Run by hand locally
-  (`npm run ingest`, `npm run ingest:runelite`); automated every 4h in
+  (`npm run ingest`, `npm run ingest:runelite`); automated hourly in
   production by a systemd timer (see `deploy/README.md`). If a run throws
   and `DISCORD_WEBHOOK_URL` is set, it posts the error to that webhook (see
   `.env.example`); otherwise it just logs to stderr.
@@ -44,7 +44,7 @@ npm run dev:web                 # http://localhost:5173
 
 Run `npm run ingest` (and `npm run ingest:runelite`) again later to
 accumulate snapshot history — daily/monthly leaderboards get more accurate
-the more snapshots exist. In production this runs on its own every 4h; see
+the more snapshots exist. In production this runs on its own every hour; see
 `deploy/README.md`.
 
 ## Deploying
