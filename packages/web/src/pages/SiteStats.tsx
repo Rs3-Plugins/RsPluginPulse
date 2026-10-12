@@ -6,6 +6,7 @@ import {
   getStatsOverview,
   getTopAuthors,
   getTopPlugins,
+  search,
   type AuthorLeaderboardRow,
   type CategoryStatsPage,
   type CompareItem,
@@ -22,6 +23,14 @@ import { Pagination } from "../components/Pagination";
 import { useGame, type Game } from "../context/GameContext";
 
 type StatsTab = "overview" | "compare";
+
+interface CandidateItem {
+  key: number;
+  label: string;
+  sub: string;
+  v: string;
+  hay: string;
+}
 
 const COMPARE_COLORS = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)"];
 
@@ -158,8 +167,15 @@ export function SiteStats() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, cmpType, idsKey, cmpMetric, cmpRange]);
 
-  function addItem(key: number) {
-    const next = [...effectiveIds, key];
+  // allCandidates is the capped local list, so a chip added from a remote
+  // search result (see suggestions below) won't resolve its name/sub there
+  // once the search box clears -- remembered here instead, same reasoning
+  // as PluginAuthorPicker's pickedItem.
+  const [resolvedNames, setResolvedNames] = useState<Record<number, { name: string; sub: string }>>({});
+
+  function addItem(candidate: CandidateItem) {
+    const next = [...effectiveIds, candidate.key];
+    setResolvedNames((prev) => ({ ...prev, [candidate.key]: { name: candidate.label, sub: candidate.sub } }));
     if (cmpType === "plugin") updateCompare({ pids: next });
     else updateCompare({ aids: next });
   }
@@ -184,7 +200,7 @@ export function SiteStats() {
     return () => document.removeEventListener("mousedown", onOutside);
   }, [suggestOpen]);
 
-  const allCandidates = useMemo(
+  const allCandidates: CandidateItem[] = useMemo(
     () =>
       cmpType === "plugin"
         ? (pluginCandidates ?? []).map((p) => ({ key: p.id, label: p.name, sub: `by ${p.authorName}`, v: compact(p.value), hay: `${p.name} ${p.authorName}`.toLowerCase() }))
@@ -199,12 +215,54 @@ export function SiteStats() {
   );
 
   const ql = query.trim().toLowerCase();
-  const suggestions = allCandidates.filter((c) => !effectiveIds.includes(c.key) && (!ql || c.hay.includes(ql))).slice(0, 6);
+  const localSuggestions = allCandidates.filter((c) => !effectiveIds.includes(c.key) && (!ql || c.hay.includes(ql)));
+
+  // allCandidates is only the top 500 by downloads (same reasoning as the
+  // API explorer's picker), so a query that doesn't match anything in it
+  // falls back to the real /api/search endpoint -- otherwise anything
+  // outside that top slice is unfindable here even though it exists.
+  const [remoteSuggestions, setRemoteSuggestions] = useState<CandidateItem[]>([]);
+  const searchSeq = useRef(0);
+  useEffect(() => {
+    if (!ql) {
+      setRemoteSuggestions([]);
+      return;
+    }
+    const seq = ++searchSeq.current;
+    const timer = setTimeout(() => {
+      search(query.trim(), game, 20)
+        .then((r) => {
+          if (searchSeq.current !== seq) return;
+          setRemoteSuggestions(
+            cmpType === "plugin"
+              ? r.plugins.map((p) => ({ key: p.id, label: p.name, sub: `by ${p.author}`, v: compact(p.total), hay: `${p.name} ${p.author}`.toLowerCase() }))
+              : r.authors.map((a) => ({
+                  key: a.id,
+                  label: a.name,
+                  sub: `${a.pluginCount} ${a.pluginCount === 1 ? "plugin" : "plugins"}`,
+                  v: compact(a.total),
+                  hay: a.name.toLowerCase(),
+                })),
+          );
+        })
+        .catch(() => {
+          if (searchSeq.current === seq) setRemoteSuggestions([]);
+        });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [ql, cmpType, game, query]);
+
+  const suggestions = (() => {
+    const localKeys = new Set(localSuggestions.map((c) => c.key));
+    const merged = [...localSuggestions, ...remoteSuggestions.filter((c) => !localKeys.has(c.key) && !effectiveIds.includes(c.key))];
+    return merged.slice(0, 6);
+  })();
   const full = effectiveIds.length >= 4;
 
   function nameAndSubOf(id: number): { name: string; sub: string } | null {
     const candidate = allCandidates.find((c) => c.key === id);
-    return candidate ? { name: candidate.label, sub: candidate.sub } : null;
+    if (candidate) return { name: candidate.label, sub: candidate.sub };
+    return resolvedNames[id] ?? null;
   }
 
   const chips = effectiveIds.map((id) => nameAndSubOf(id) ?? { name: `#${id}`, sub: "" }).map((c, i) => ({ ...c, key: effectiveIds[i] }));
@@ -277,7 +335,7 @@ export function SiteStats() {
                         e.preventDefault();
                         const s = suggestions[highlight];
                         if (s && !full) {
-                          addItem(s.key);
+                          addItem(s);
                           setQuery("");
                           setSuggestOpen(false);
                         }
@@ -294,7 +352,7 @@ export function SiteStats() {
                           className={`cmp-suggest-row ${i === highlight ? "highlight" : ""}`}
                           onMouseEnter={() => setHighlight(i)}
                           onClick={() => {
-                            addItem(s.key);
+                            addItem(s);
                             setQuery("");
                             setSuggestOpen(false);
                           }}

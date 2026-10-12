@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { API_BASE, getTopAuthors, getTopPlugins, type AuthorLeaderboardRow, type PluginLeaderboardRow } from "../api";
+import { API_BASE, getTopAuthors, getTopPlugins, search, type AuthorLeaderboardRow, type PluginLeaderboardRow } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Dropdown } from "../components/Dropdown";
 import { PluginAuthorPicker, type PickerItem } from "../components/PluginAuthorPicker";
@@ -649,6 +649,21 @@ export function ApiExplorer() {
     avatarUrl: a.avatarUrl,
   }));
 
+  // Falls back to the real /api/search endpoint (full catalog) once the
+  // picker's local, capped candidate list doesn't have a match -- see
+  // PluginAuthorPicker's onSearch.
+  const searchPlugins = useCallback(
+    (q: string) => search(q, game, 20).then((r) => r.plugins.map((p) => ({ id: p.id, name: p.name, sub: `${p.author} · ${p.total.toLocaleString()} downloads` }))),
+    [game],
+  );
+  const searchAuthors = useCallback(
+    (q: string) =>
+      search(q, game, 20).then((r) =>
+        r.authors.map((a) => ({ id: a.id, name: a.name, sub: `${a.pluginCount} plugin${a.pluginCount === 1 ? "" : "s"}`, avatarUrl: a.avatarUrl })),
+      ),
+    [game],
+  );
+
   const bKey = bType === "plugin" ? bPluginId : bAuthorId;
   const badgeEndpointUrl = bKey !== null ? `${API_BASE}/api/badge/${bType}/${bKey}/${bMetric}` : null;
   const shieldsParams = new URLSearchParams();
@@ -866,6 +881,7 @@ export function ApiExplorer() {
                   onChange={(id) => (eType === "plugin" ? setEPluginId(id) : setEAuthorId(id))}
                   placeholder={eType === "plugin" ? "Select a plugin…" : "Select an author…"}
                   loading={eType === "plugin" ? pluginList === null : authorList === null}
+                  onSearch={eType === "plugin" ? searchPlugins : searchAuthors}
                 />
               </div>
 
@@ -1062,6 +1078,7 @@ export function ApiExplorer() {
                   onChange={(id) => (bType === "plugin" ? setBPluginId(id) : setBAuthorId(id))}
                   placeholder={bType === "plugin" ? "Select a plugin…" : "Select an author…"}
                   loading={bType === "plugin" ? pluginList === null : authorList === null}
+                  onSearch={bType === "plugin" ? searchPlugins : searchAuthors}
                 />
               </div>
 
@@ -1301,6 +1318,8 @@ export function ApiExplorer() {
                     pluginItems={pluginItems}
                     authorItems={authorItems}
                     pickerLoading={pluginList === null || authorList === null}
+                    searchPlugins={searchPlugins}
+                    searchAuthors={searchAuthors}
                   />
                 ))}
               </>
@@ -1324,6 +1343,8 @@ export function ApiExplorer() {
                     pluginItems={pluginItems}
                     authorItems={authorItems}
                     pickerLoading={pluginList === null || authorList === null}
+                    searchPlugins={searchPlugins}
+                    searchAuthors={searchAuthors}
                   />
                 ))}
               </>
@@ -1420,6 +1441,8 @@ function ParamRow({
   pluginItems,
   authorItems,
   pickerLoading,
+  searchPlugins,
+  searchAuthors,
 }: {
   param: ParamDef;
   value: string;
@@ -1428,6 +1451,8 @@ function ParamRow({
   pluginItems?: PickerItem[];
   authorItems?: PickerItem[];
   pickerLoading?: boolean;
+  searchPlugins?: (query: string) => Promise<PickerItem[]>;
+  searchAuthors?: (query: string) => Promise<PickerItem[]>;
 }) {
   const typeLabel = param.type === "enum" ? (param.options ?? []).join(" | ") : param.type;
   return (
@@ -1448,6 +1473,7 @@ function ParamRow({
             onChange={(id) => onChange(String(id))}
             placeholder={pickerKind === "plugin" ? "Search plugins…" : "Search authors…"}
             loading={pickerLoading}
+            onSearch={pickerKind === "plugin" ? searchPlugins : searchAuthors}
           />
         ) : param.type === "enum" ? (
           <Dropdown value={value} options={(param.options ?? []).map((o) => ({ value: o, label: o }))} onChange={onChange} ariaLabel={param.name} />
