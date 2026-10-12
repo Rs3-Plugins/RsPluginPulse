@@ -257,8 +257,13 @@ export async function renderCardSvg(type: EmbedCardType, entityId: number, optio
   const subtitleText = options.showSubtitle ? `<text x="${nameX}" y="50" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="12" fill="${pal.muted}">${escapeXml(sub)}</text>` : "";
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" font-variant-numeric="tabular-nums">
+  <defs>
+    <clipPath id="cardShape">
+      <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="10" />
+    </clipPath>
+  </defs>
   <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="10" fill="${pal.bg}" stroke="${pal.border}" />
-  <rect x="2" y="1" width="${width - 4}" height="2" fill="${pal.gold}" />
+  <rect x="2" y="1" width="${width - 4}" height="2" fill="${pal.gold}" clip-path="url(#cardShape)" />
   ${icon}
   <text x="${nameX}" y="32" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="16" font-weight="700" fill="${pal.text}">${escapeXml(name)}</text>
   ${subtitleText}
