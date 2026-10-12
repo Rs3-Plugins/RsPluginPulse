@@ -1,4 +1,5 @@
 import { getFastestGrowingPlugins } from "@rspluginpulse/db";
+import { CACHE_TTL, remember } from "@/lib/cache";
 import { jsonWithCors, OPTIONS as corsOptions } from "@/lib/cors";
 import { parseGame } from "@/lib/game";
 
@@ -10,6 +11,8 @@ export async function GET(request: Request) {
   const days = Math.min(Math.max(Number(searchParams.get("days") ?? 7) || 7, 1), 365);
   const game = parseGame(searchParams.get("game"));
 
-  const plugins = await getFastestGrowingPlugins(limit, days, game);
+  const plugins = await remember(`leaderboard:fastest-growing:${limit}:${days}:${game}`, CACHE_TTL.LEADERBOARD, () =>
+    getFastestGrowingPlugins(limit, days, game),
+  );
   return jsonWithCors({ plugins });
 }

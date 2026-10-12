@@ -1,4 +1,5 @@
 import { getTopAuthors } from "@rspluginpulse/db";
+import { CACHE_TTL, remember } from "@/lib/cache";
 import { jsonWithCors, OPTIONS as corsOptions } from "@/lib/cors";
 import { parseGame } from "@/lib/game";
 import { parsePeriod } from "@/lib/period";
@@ -11,6 +12,8 @@ export async function GET(request: Request) {
   const limit = Math.min(Number(searchParams.get("limit") ?? 50) || 50, 10000);
   const game = parseGame(searchParams.get("game"));
 
-  const authors = await getTopAuthors(period, limit, game);
+  const authors = await remember(`leaderboard:authors:${period}:${limit}:${game}`, CACHE_TTL.LEADERBOARD, () =>
+    getTopAuthors(period, limit, game),
+  );
   return jsonWithCors({ period, authors });
 }
