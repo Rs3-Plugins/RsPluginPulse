@@ -663,8 +663,8 @@ export function ApiExplorer() {
       if ((values[p.name] ?? "").trim() !== "") continue;
       const list = kind === "plugin" ? pluginList : authorList;
       if (!list || list.length === 0) continue;
-      const firstId = kind === "plugin" ? (list as PluginLeaderboardRow[])[0].id : (list as AuthorLeaderboardRow[])[0].authorId;
-      setParam(p.name, String(firstId));
+      const firstNameId = kind === "plugin" ? (list as PluginLeaderboardRow[])[0].nameId : (list as AuthorLeaderboardRow[])[0].nameId;
+      setParam(p.name, firstNameId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devTab, endpoint.key, pluginList, authorList]);
@@ -680,9 +680,15 @@ export function ApiExplorer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devTab, endpoint.key, values.type]);
 
-  const pluginItems: PickerItem[] = (pluginList ?? []).map((p) => ({ id: p.id, name: p.name, sub: `${p.authorName} · ${p.value.toLocaleString()} downloads` }));
+  const pluginItems: PickerItem[] = (pluginList ?? []).map((p) => ({
+    id: p.id,
+    nameId: p.nameId,
+    name: p.name,
+    sub: `${p.authorName} · ${p.value.toLocaleString()} downloads`,
+  }));
   const authorItems: PickerItem[] = (authorList ?? []).map((a) => ({
     id: a.authorId,
+    nameId: a.nameId,
     name: a.authorName,
     sub: `${a.pluginCount} plugin${a.pluginCount === 1 ? "" : "s"}`,
     avatarUrl: a.avatarUrl,
@@ -692,13 +698,22 @@ export function ApiExplorer() {
   // picker's local, capped candidate list doesn't have a match -- see
   // PluginAuthorPicker's onSearch.
   const searchPlugins = useCallback(
-    (q: string) => search(q, game, 20).then((r) => r.plugins.map((p) => ({ id: p.id, name: p.name, sub: `${p.author} · ${p.total.toLocaleString()} downloads` }))),
+    (q: string) =>
+      search(q, game, 20).then((r) =>
+        r.plugins.map((p) => ({ id: p.id, nameId: p.nameId, name: p.name, sub: `${p.author} · ${p.total.toLocaleString()} downloads` })),
+      ),
     [game],
   );
   const searchAuthors = useCallback(
     (q: string) =>
       search(q, game, 20).then((r) =>
-        r.authors.map((a) => ({ id: a.id, name: a.name, sub: `${a.pluginCount} plugin${a.pluginCount === 1 ? "" : "s"}`, avatarUrl: a.avatarUrl })),
+        r.authors.map((a) => ({
+          id: a.id,
+          nameId: a.nameId,
+          name: a.name,
+          sub: `${a.pluginCount} plugin${a.pluginCount === 1 ? "" : "s"}`,
+          avatarUrl: a.avatarUrl,
+        })),
       ),
     [game],
   );
@@ -1508,8 +1523,19 @@ function ParamRow({
         {pickerKind ? (
           <PluginAuthorPicker
             items={(pickerKind === "plugin" ? pluginItems : authorItems) ?? []}
-            value={value.trim() === "" ? null : Number(value)}
-            onChange={(id) => onChange(String(id))}
+            // The param's actual text value is the slug once something's
+            // picked (see onChange below) -- the picker's own `value` is
+            // still numeric (it drives which row shows a checkmark), so a
+            // slug has to be resolved back to its id here. A bare numeric
+            // id still typed by hand keeps working too.
+            value={(() => {
+              const trimmed = value.trim();
+              if (!trimmed) return null;
+              const items = (pickerKind === "plugin" ? pluginItems : authorItems) ?? [];
+              if (/^\d+$/.test(trimmed)) return Number(trimmed);
+              return items.find((i) => i.nameId === trimmed)?.id ?? null;
+            })()}
+            onChange={(_id, item) => onChange(item.nameId ?? String(item.id))}
             placeholder={pickerKind === "plugin" ? "Search plugins…" : "Search authors…"}
             loading={pickerLoading}
             onSearch={pickerKind === "plugin" ? searchPlugins : searchAuthors}

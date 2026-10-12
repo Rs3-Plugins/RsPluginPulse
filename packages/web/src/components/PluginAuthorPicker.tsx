@@ -3,6 +3,11 @@ import { SearchBox, type SearchBoxGroup, type SearchBoxItem } from "./SearchBox"
 
 export interface PickerItem {
   id: number;
+  // The pretty-URL slug (e.g. "117hd") -- optional since a couple of
+  // older callers (header search's navigational items) don't need it,
+  // but anything that ends up in an API request URL should prefer this
+  // over the raw numeric id now that the backend accepts both.
+  nameId?: string;
   name: string;
   sub: string;
   // Optional, additive: callers that only pick a plain id (the badge/embed
