@@ -7,3 +7,4 @@ packages/web/dist/
 *.log
 packages/api/.cache/
 /tmp-mariadb-bench
+packages/ingest/tmp/
