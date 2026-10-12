@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "ingest": "tsx src/run.ts",
-    "ingest:runelite": "tsx src/run-runelite.ts"
+    "ingest:runelite": "tsx src/run-runelite.ts",
+    "import:phyce": "tsx src/import-phyce-dump.ts"
   },
   "dependencies": {
     "@rspluginpulse/db": "*"
