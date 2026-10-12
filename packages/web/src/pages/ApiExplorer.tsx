@@ -567,10 +567,14 @@ export function ApiExplorer() {
 
   useEffect(() => {
     if (devTab !== "badge" && devTab !== "embed" && devTab !== "api") return;
-    getTopPlugins("alltime", game)
+    // Just feeds the badge/embed/param pickers' client-side search -- the
+    // full catalog (limit's default of 10000) was ~815KB/210KB of JSON on
+    // every tab switch or game change for a search box nobody scrolls past
+    // the most-downloaded few hundred results of anyway.
+    getTopPlugins("alltime", game, 500)
       .then((r) => setPluginList(r.plugins))
       .catch(() => setPluginList([]));
-    getTopAuthors("alltime", game)
+    getTopAuthors("alltime", game, 500)
       .then((r) => setAuthorList(r.authors))
       .catch(() => setAuthorList([]));
   }, [devTab, game]);

@@ -6,3 +6,4 @@ dist/
 packages/web/dist/
 *.log
 packages/api/.cache/
+/tmp-mariadb-bench
