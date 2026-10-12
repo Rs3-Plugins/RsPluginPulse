@@ -119,6 +119,7 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
   const [activeIndex, setActiveIndex] = useState(0);
   const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const ddRef = useRef<HTMLDivElement>(null);
   const innerInputRef = useRef<HTMLInputElement>(null);
   useImperativeHandle(forwardedRef, () => innerInputRef.current as HTMLInputElement);
 
@@ -149,7 +150,14 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
   useEffect(() => {
     if (!suggest || !open) return;
     function onOutside(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      // The dropdown is portaled to <body>, so it's not a descendant of
+      // rootRef -- without also checking ddRef, every click on a row
+      // registers as "outside" on mousedown and closes the dropdown
+      // before the row's own click handler ever runs.
+      if (rootRef.current?.contains(target)) return;
+      if (ddRef.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onOutside);
     return () => document.removeEventListener("mousedown", onOutside);
@@ -238,7 +246,7 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
       )}
 
       {suggest && open && rect && createPortal(
-        <div className="pp-search__dd" style={{ top: rect.top, left: rect.left, width: rect.width }} role="listbox" aria-label="Search results">
+        <div ref={ddRef} className="pp-search__dd" style={{ top: rect.top, left: rect.left, width: rect.width }} role="listbox" aria-label="Search results">
           <div className="pp-search__dd-body">
             {loading && <div className="pp-search__empty">Loading…</div>}
             {!loading &&
