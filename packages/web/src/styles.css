@@ -2383,11 +2383,12 @@ h1 {
 }
 
 .footer-disclaimer-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+  overflow: hidden;
+}
+
+.footer-disclaimer-row .footer-kofi {
+  float: right;
+  margin: 0 0 8px 16px;
 }
 
 .footer-wordmark {
