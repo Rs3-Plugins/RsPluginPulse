@@ -14,7 +14,7 @@ import { HotCard } from "./HotCard";
 import { TagChips, TagFilter, matchesTags, type TagState } from "./TagFilter";
 import { Dropdown } from "./Dropdown";
 import { Pagination, PAGE_SIZE_OPTIONS } from "./Pagination";
-import { SearchBox, type SearchBoxGroup } from "./SearchBox";
+import { SearchBox } from "./SearchBox";
 import { useGame, type Game } from "../context/GameContext";
 
 type Entity = "plugins" | "authors" | "growth" | "new";
@@ -247,62 +247,6 @@ export function Leaderboard() {
 
   const isGrowthAuthors = entity === "growth" && growthView === "authors";
 
-  // Top suggestions for whichever tab is active, shown in a dropdown under
-  // the search box -- only once there's a query, so focusing the box
-  // without typing doesn't just repeat the top of the table underneath it.
-  const SUGGEST_LIMIT = 6;
-  const searchGroups = useMemo<SearchBoxGroup[]>(() => {
-    if (!query.trim()) return [];
-    if (entity === "new") {
-      const items = (filteredNewest ?? []).slice(0, SUGGEST_LIMIT).map((row) => ({
-        id: row.id,
-        name: row.name,
-        sub: row.authorName,
-        value: formatDate(row.dateAdded),
-        href: `/plugin/${row.id}`,
-      }));
-      return [{ label: "New releases", items }];
-    }
-    if (entity === "growth") {
-      if (isGrowthAuthors) {
-        const items = (filteredGrowthAuthors ?? []).slice(0, SUGGEST_LIMIT).map((row) => ({
-          id: row.authorId,
-          name: row.authorName,
-          sub: `${row.pluginCount} plugin${row.pluginCount === 1 ? "" : "s"}`,
-          value: `+${Math.round(row.avgGrowthPct)}%`,
-          href: `/author/${row.authorId}`,
-        }));
-        return [{ label: "Authors", items }];
-      }
-      const items = (filteredGrowth ?? []).slice(0, SUGGEST_LIMIT).map((row) => ({
-        id: row.id,
-        name: row.name,
-        sub: row.authorName,
-        value: `+${Math.round(row.downloadsGrowthPct)}%`,
-        href: `/plugin/${row.id}`,
-      }));
-      return [{ label: "Plugins", items }];
-    }
-    if (entity === "authors") {
-      const items = (filteredAuthors ?? []).slice(0, SUGGEST_LIMIT).map((row) => ({
-        id: row.authorId,
-        name: row.authorName,
-        sub: `${row.pluginCount} plugin${row.pluginCount === 1 ? "" : "s"}`,
-        value: formatValue(row.value, period),
-        href: `/author/${row.authorId}`,
-      }));
-      return [{ label: "Authors", items }];
-    }
-    const items = (filteredPlugins ?? []).slice(0, SUGGEST_LIMIT).map((row) => ({
-      id: row.id,
-      name: row.name,
-      sub: row.authorName,
-      value: formatValue(row.value, period),
-      href: `/plugin/${row.id}`,
-    }));
-    return [{ label: "Plugins", items }];
-  }, [query, entity, isGrowthAuthors, filteredPlugins, filteredAuthors, filteredGrowth, filteredGrowthAuthors, filteredNewest, period]);
-
   const totalUnfiltered =
     entity === "plugins"
       ? tagFilteredPlugins?.length ?? 0
@@ -436,10 +380,7 @@ export function Leaderboard() {
                     ref={searchRef}
                     query={query}
                     onQueryChange={setQuery}
-                    groups={searchGroups}
-                    onPick={(item) => navigate(item.href!)}
                     placeholder={entity === "authors" || isGrowthAuthors ? "Search authors…" : "Search plugins…"}
-                    emptyMessage="No matches."
                   />
                   {entity !== "growth" && game !== "runelite" && (
                     <TagFilter

@@ -25,8 +25,13 @@ export interface SearchBoxGroup {
 interface SearchBoxProps {
   query: string;
   onQueryChange: (q: string) => void;
-  groups: SearchBoxGroup[];
-  onPick: (item: SearchBoxItem, group: SearchBoxGroup) => void;
+  // Omit both entirely for a plain styled search input with no suggestions
+  // dropdown at all (e.g. the Leaderboard's table filter, which already
+  // shows every match in the table right below -- a dropdown on top of
+  // that was just duplicating it). Pass groups (even as []) to opt into
+  // the dropdown.
+  groups?: SearchBoxGroup[];
+  onPick?: (item: SearchBoxItem, group: SearchBoxGroup) => void;
   placeholder: string;
   loading?: boolean;
   emptyMessage?: string;
@@ -84,6 +89,7 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
   { query, onQueryChange, groups, onPick, placeholder, loading, emptyMessage, className, onOpenChange },
   forwardedRef,
 ) {
+  const suggest = groups !== undefined;
   const [open, setOpenState] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -95,7 +101,7 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
     onOpenChange?.(next);
   }
 
-  const flatItems = useMemo(() => groups.flatMap((g) => g.items.map((item) => ({ item, group: g }))), [groups]);
+  const flatItems = useMemo(() => (groups ?? []).flatMap((g) => g.items.map((item) => ({ item, group: g }))), [groups]);
   const hasItems = flatItems.length > 0;
 
   useEffect(() => {
@@ -103,17 +109,17 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
   }, [groups]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!suggest || !open) return;
     function onOutside(e: MouseEvent) {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
     }
     document.addEventListener("mousedown", onOutside);
     return () => document.removeEventListener("mousedown", onOutside);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [suggest, open]);
 
   function pick(entry: { item: SearchBoxItem; group: SearchBoxGroup }) {
-    onPick(entry.item, entry.group);
+    onPick?.(entry.item, entry.group);
     setOpen(false);
   }
 
@@ -122,6 +128,8 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
       e.preventDefault();
       setOpen(false);
       e.currentTarget.blur();
+    } else if (!suggest) {
+      return;
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
       setActiveIndex((i) => Math.min(i + 1, flatItems.length - 1));
@@ -138,7 +146,7 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
   let rowIndex = -1;
 
   return (
-    <div className={`pp-search ${className ?? ""}`} data-open={open ? "true" : "false"} ref={rootRef}>
+    <div className={`pp-search ${className ?? ""}`} data-open={suggest && open ? "true" : "false"} ref={rootRef}>
       <SearchIcon className="pp-search__icon" size={14} />
       <input
         ref={innerInputRef}
@@ -146,10 +154,10 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
         type="search"
         placeholder={placeholder}
         aria-label={placeholder}
-        aria-expanded={open}
+        aria-expanded={suggest && open}
         autoComplete="off"
         value={query}
-        onFocus={() => setOpen(true)}
+        onFocus={() => suggest && setOpen(true)}
         onChange={(e) => onQueryChange(e.target.value)}
         onKeyDown={onKeyDown}
       />
@@ -167,12 +175,12 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
         </button>
       )}
 
-      {open && (
+      {suggest && open && (
         <div className="pp-search__dd" role="listbox" aria-label="Search results">
           <div className="pp-search__dd-body">
             {loading && <div className="pp-search__empty">Loading…</div>}
             {!loading &&
-              groups.map((group, groupIndex) => {
+              (groups ?? []).map((group, groupIndex) => {
                 if (group.items.length === 0) return null;
                 return (
                   <div key={group.label}>
