@@ -261,6 +261,20 @@ export function getTopAuthors(period: Period, game: Game = "rs3", limit = 10000)
   return getJson<{ period: Period; authors: AuthorLeaderboardRow[] }>(`/api/leaderboard/authors?period=${period}&limit=${limit}&game=${game}`);
 }
 
+export interface PluginInfo extends PluginMeta {
+  downloadsTotal: number;
+  downloadsToday: number;
+  subscribersTotal: number;
+  popularityRankPosition: number | null;
+}
+
+// Basic metadata + current stats, no snapshot history -- a cheaper call
+// than getPluginTrend for callers that only want "what are this plugin's
+// numbers right now".
+export function getPluginInfo(id: string | number, game: Game = "rs3") {
+  return getJson<PluginInfo>(`/api/plugins/${encodeURIComponent(id)}?game=${game}`);
+}
+
 // `id` may be a numeric id (globally unique, no game needed) or a pretty
 // slug ("117hd") -- slugs are only unique per game, so `game` matters for
 // those. Always sent; the API ignores it for a numeric id.

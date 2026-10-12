@@ -255,20 +255,34 @@ const ENDPOINTS: EndpointDef[] = [
     queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game to pick from." }],
   },
   {
+    key: "plugin-info",
+    path: "/api/plugins/{id}",
+    title: "Plugin info",
+    desc: "Basic plugin metadata plus its current stats (downloads/installs, subscribers, today) -- no snapshot history. Use /trend below if you need the full history.",
+    pathParams: [
+      { name: "id", type: "int", required: true, desc: "Plugin id or name slug (e.g. 117hd). Search by name below.", pickerKind: "plugin" },
+    ],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Only needed when id is a slug (slugs are unique per game)." }],
+  },
+  {
     key: "plugin-trend",
     path: "/api/plugins/{id}/trend",
     title: "Plugin trend",
     desc: "Plugin metadata plus its full downloads/subscribers snapshot history.",
-    pathParams: [{ name: "id", type: "int", required: true, desc: "Plugin id. Search by name below.", pickerKind: "plugin" }],
-    queryParams: [],
+    pathParams: [
+      { name: "id", type: "int", required: true, desc: "Plugin id or name slug (e.g. 117hd). Search by name below.", pickerKind: "plugin" },
+    ],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Only needed when id is a slug (slugs are unique per game)." }],
   },
   {
     key: "author-profile",
     path: "/api/authors/{id}",
     title: "Author profile",
-    desc: "Aggregated totals, ranks, and plugin list for an author.",
-    pathParams: [{ name: "id", type: "int", required: true, desc: "Author id. Search by name below.", pickerKind: "author" }],
-    queryParams: [],
+    desc: "Aggregated totals, ranks, and plugin list for an author -- this already covers \"basic info\" for an author (installs/downloads, subscribers, weekly gain, plugin count).",
+    pathParams: [
+      { name: "id", type: "int", required: true, desc: "Author id or name slug (e.g. jin-jiyunsun). Search by name below.", pickerKind: "author" },
+    ],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Only needed when id is a slug (slugs are unique per game)." }],
   },
   {
     key: "badge",

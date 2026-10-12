@@ -704,6 +704,63 @@ export async function getPlugin(pluginId: number): Promise<PluginMeta | null> {
   };
 }
 
+export interface PluginInfo extends PluginMeta {
+  downloadsTotal: number;
+  downloadsToday: number;
+  subscribersTotal: number;
+  popularityRankPosition: number | null;
+}
+
+// Plugin metadata plus just its latest stats -- unlike getPluginTrend,
+// which pulls the entire snapshot history, this is a cheap one-row-per-table
+// lookup for callers that only want "what are this plugin's numbers right
+// now" (a basic-info API, a bot command, etc.) without paying for history
+// they're not going to use.
+export async function getPluginInfo(pluginId: number): Promise<PluginInfo | null> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT p.id, p.game, p.name_id, p.name, p.author_id, p.author_name, p.author_avatar_url, p.profile_url, p.tags, p.logo_url, p.summary,
+            p.ratings_total, p.ratings_positive, p.ratings_negative, p.ratings_percentage_positive, p.ratings_display_text,
+            p.date_added, p.date_updated,
+            l.downloads_total, l.downloads_today, l.subscribers_total, l.popularity_rank_position
+     FROM plugins p
+     JOIN LATERAL (
+       SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
+     ) l ON true
+     WHERE p.id = $1`,
+    [pluginId],
+  );
+  if (rows.length === 0) return null;
+  const row = rows[0];
+  const coAuthors = await getPluginCoAuthors(pluginId);
+  return {
+    id: row.id,
+    game: row.game,
+    nameId: row.name_id,
+    name: row.name,
+    authorId: row.author_id,
+    authorName: row.author_name,
+    authorNameId: slugify(row.author_name),
+    authorAvatarUrl: row.author_avatar_url,
+    coAuthors,
+    profileUrl: row.profile_url,
+    tags: row.tags ?? [],
+    logoUrl: row.logo_url,
+    summary: row.summary,
+    ratingsTotal: row.ratings_total,
+    ratingsPositive: row.ratings_positive,
+    ratingsNegative: row.ratings_negative,
+    ratingsPercentagePositive: row.ratings_percentage_positive,
+    ratingsDisplayText: row.ratings_display_text,
+    dateAdded: row.date_added.toISOString(),
+    dateUpdated: row.date_updated.toISOString(),
+    downloadsTotal: Number(row.downloads_total),
+    downloadsToday: Number(row.downloads_today),
+    subscribersTotal: Number(row.subscribers_total),
+    popularityRankPosition: row.popularity_rank_position === null ? null : Number(row.popularity_rank_position),
+  };
+}
+
 export async function getPluginTrend(pluginId: number): Promise<PluginTrendPoint[]> {
   const pool = getPool();
   const { rows } = await pool.query(
