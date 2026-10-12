@@ -1,5 +1,6 @@
 import { randomBytes } from "crypto";
 import { getPool } from "./client";
+import { slugify } from "./slug";
 import type {
   AuthorLeaderboardRow,
   AuthorProfile,
@@ -160,10 +161,11 @@ export async function getEmbedCard(id: string): Promise<EmbedCardConfig | null> 
   };
 }
 
-export async function getRandomPluginId(game = "rs3"): Promise<number | null> {
+export async function getRandomPluginId(game = "rs3"): Promise<{ id: number; nameId: string } | null> {
   const pool = getPool();
-  const { rows } = await pool.query(`SELECT id FROM plugins WHERE game = $1 ORDER BY random() LIMIT 1`, [game]);
-  return rows[0]?.id ?? null;
+  const { rows } = await pool.query(`SELECT id, name_id FROM plugins WHERE game = $1 ORDER BY random() LIMIT 1`, [game]);
+  if (rows.length === 0) return null;
+  return { id: rows[0].id, nameId: rows[0].name_id };
 }
 
 // Newest plugins first -- unlike the leaderboards, this intentionally
@@ -188,6 +190,7 @@ export async function getNewestPlugins(limit = 50, game = "rs3"): Promise<Newest
     name: row.name,
     authorId: row.author_id,
     authorName: row.author_name,
+    authorNameId: slugify(row.author_name),
     profileUrl: row.profile_url,
     tags: row.tags ?? [],
     logoUrl: row.logo_url,
@@ -422,6 +425,7 @@ export async function getFastestGrowingPlugins(limit = 5, cutoffDays = 7, game =
       name: row.name,
       authorId: row.author_id,
       authorName: row.author_name,
+      authorNameId: slugify(row.author_name),
       profileUrl: row.profile_url,
       downloadsTotal: Number(row.downloads_total),
       subscribersTotal: Number(row.subscribers_total),
@@ -452,6 +456,7 @@ export async function getTopAuthors(period: Period, limit = 50, game = "rs3"): P
       byAuthor.set(plugin.authorId, {
         authorId: plugin.authorId,
         authorName: plugin.authorName,
+        nameId: plugin.authorNameId,
         avatarUrl: plugin.authorAvatarUrl,
         pluginCount: 1,
         value: plugin.value,
@@ -537,6 +542,7 @@ export async function searchPluginsAndAuthors(
     return {
       plugins: plugins.map((p) => ({
         id: p.id,
+        nameId: p.nameId,
         name: p.name,
         author: p.authorName,
         authorAvatarUrl: p.authorAvatarUrl,
@@ -544,6 +550,7 @@ export async function searchPluginsAndAuthors(
       })),
       authors: authors.map((a) => ({
         id: a.authorId,
+        nameId: a.nameId,
         name: a.authorName,
         avatarUrl: a.avatarUrl,
         pluginCount: a.pluginCount,
@@ -562,7 +569,7 @@ export async function searchPluginsAndAuthors(
        FROM plugin_snapshots s
        ORDER BY s.plugin_id, s.captured_at DESC
      )
-     SELECT p.id, p.name, p.author_name, p.author_avatar_url, l.downloads_total AS total
+     SELECT p.id, p.name_id, p.name, p.author_name, p.author_avatar_url, l.downloads_total AS total
      FROM plugins p
      JOIN latest l ON l.plugin_id = p.id
      WHERE p.game = $2
@@ -604,6 +611,7 @@ export async function searchPluginsAndAuthors(
   return {
     plugins: pluginsResult.rows.map((row) => ({
       id: row.id,
+      nameId: row.name_id,
       name: row.name,
       author: row.author_name,
       authorAvatarUrl: row.author_avatar_url,
@@ -611,6 +619,7 @@ export async function searchPluginsAndAuthors(
     })),
     authors: authorsResult.rows.map((row) => ({
       id: row.author_id,
+      nameId: slugify(row.author_name),
       name: row.author_name,
       avatarUrl: row.author_avatar_url,
       pluginCount: Number(row.plugin_count),
@@ -627,6 +636,7 @@ export interface PluginMeta {
   name: string;
   authorId: number;
   authorName: string;
+  authorNameId: string;
   authorAvatarUrl: string | null;
   coAuthors: CoAuthor[];
   profileUrl: string;
@@ -651,6 +661,7 @@ export async function getPluginCoAuthors(pluginId: number): Promise<CoAuthor[]> 
   );
   return rows.map((row) => ({
     authorId: row.author_id,
+    nameId: slugify(row.author_name),
     name: row.author_name,
     avatarUrl: row.author_avatar_url,
     profileUrl: row.author_profile_url,
@@ -676,6 +687,7 @@ export async function getPlugin(pluginId: number): Promise<PluginMeta | null> {
     name: row.name,
     authorId: row.author_id,
     authorName: row.author_name,
+    authorNameId: slugify(row.author_name),
     authorAvatarUrl: row.author_avatar_url,
     coAuthors,
     profileUrl: row.profile_url,
@@ -714,6 +726,7 @@ function toPluginRow(row: any): PluginLeaderboardRow {
     name: row.name,
     authorId: row.author_id,
     authorName: row.author_name,
+    authorNameId: slugify(row.author_name),
     authorAvatarUrl: row.author_avatar_url,
     profileUrl: row.profile_url,
     tags: row.tags ?? [],
@@ -947,7 +960,7 @@ export async function getCategoryStatsPage(game: string, page: number, pageSize:
 async function getFastestGrowingWithSpark(limit: number, game: string): Promise<GrowthSparkRow[]> {
   const pool = getPool();
   const { rows } = await pool.query(
-    `SELECT p.id, p.name, p.author_id, p.author_name,
+    `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name,
             l.downloads_total AS total_now,
             b7.downloads_total AS total_7,
             b14.downloads_total AS total_14
@@ -982,6 +995,7 @@ async function getFastestGrowingWithSpark(limit: number, game: string): Promise<
 
   return candidates.map((c) => ({
     id: c.row.id,
+    nameId: c.row.name_id,
     name: c.row.name,
     authorId: c.row.author_id,
     authorName: c.row.author_name,
@@ -992,7 +1006,7 @@ async function getFastestGrowingWithSpark(limit: number, game: string): Promise<
 
 async function getNewReleases(limit: number, withinDays: number, game: string): Promise<NewReleaseRow[]> {
   const pool = getPool();
-  const recentQuery = `SELECT p.id, p.name, p.author_id, p.author_name, p.date_added, l.downloads_total
+  const recentQuery = `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.date_added, l.downloads_total
      FROM plugins p
      JOIN LATERAL (SELECT downloads_total FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1) l ON true
      WHERE p.game = $3 AND p.date_added >= now() - ($2 * interval '1 day')
@@ -1002,7 +1016,7 @@ async function getNewReleases(limit: number, withinDays: number, game: string): 
 
   if (rows.length < 3) {
     ({ rows } = await pool.query(
-      `SELECT p.id, p.name, p.author_id, p.author_name, p.date_added, l.downloads_total
+      `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.date_added, l.downloads_total
        FROM plugins p
        JOIN LATERAL (SELECT downloads_total FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1) l ON true
        WHERE p.game = $2
@@ -1014,6 +1028,7 @@ async function getNewReleases(limit: number, withinDays: number, game: string): 
 
   return rows.map((row) => ({
     id: row.id,
+    nameId: row.name_id,
     name: row.name,
     authorId: row.author_id,
     authorName: row.author_name,
@@ -1159,7 +1174,7 @@ function resolveCompareRange(range: CompareRange, startDates: string[]): { fromD
 }
 
 const COMPARE_STATS_FIELDS = `
-     p.id, p.game, p.name, p.author_id, p.author_name, p.date_added,
+     p.id, p.game, p.name_id, p.name, p.author_id, p.author_name, p.date_added,
      l.downloads_total AS total_now, l.downloads_today AS today_now, l.subscribers_total AS subs_now,
      COALESCE(b7.downloads_total, b7f.downloads_total, l.downloads_total) AS total_7,
      COALESCE(b30.downloads_total, b30f.downloads_total, l.downloads_total) AS total_30
@@ -1197,6 +1212,7 @@ export async function getCompareData(type: CompareType, keys: number[], metric: 
       const row = byId.get(id)!;
       return {
         key: id,
+        nameId: row.name_id,
         name: row.name,
         sub: `by ${row.author_name}`,
         series: extractMetricSeries(seriesMap.get(id) ?? [], metric, padCount),
@@ -1252,6 +1268,7 @@ export async function getCompareData(type: CompareType, keys: number[], metric: 
     const subs = plugins.reduce((sum, r) => sum + Number(r.subs_now), 0);
     return {
       key: authorId,
+      nameId: slugify(plugins[0].author_name),
       name: plugins[0].author_name,
       sub: `${plugins.length} ${plugins.length === 1 ? "plugin" : "plugins"}`,
       series: extractMetricSeries(sumSeries, metric, padCount),
@@ -1270,4 +1287,35 @@ export async function getCompareData(type: CompareType, keys: number[], metric: 
   });
 
   return { type, metric, from: toDateKey(fromDate), to: toDateKey(toDate), items };
+}
+
+// Resolves a plugin's pretty URL slug (e.g. "117hd") to its numeric id.
+// name_id is only unique per game (a handful of names collide across
+// mod.io/RuneLite, e.g. "quest-helper"), so game is required here --
+// unlike the numeric-id path, which needs no game to be unambiguous.
+export async function getPluginIdByNameId(nameId: string, game: string): Promise<number | null> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT id FROM plugins WHERE game = $1 AND name_id = $2`, [game, nameId]);
+  return rows[0]?.id ?? null;
+}
+
+// Authors have no stored slug (author info is denormalized across
+// plugins/plugin_authors, not a dedicated table), so this resolves a
+// pretty URL slug back to an author_id by slugifying every distinct
+// author name in the game and matching -- same slugify() used when the
+// API annotates rows with nameId, so a slug it hands out always resolves
+// back here. Ties (two different author_ids slugifying to the same
+// string) pick the lowest id, which is at least deterministic.
+export async function getAuthorIdBySlug(slug: string, game: string): Promise<number | null> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT DISTINCT pa.author_id, pa.author_name
+     FROM plugin_authors pa
+     JOIN plugins p ON p.id = pa.plugin_id
+     WHERE p.game = $1
+     ORDER BY pa.author_id ASC`,
+    [game],
+  );
+  const match = rows.find((r) => slugify(r.author_name) === slug);
+  return match?.author_id ?? null;
 }

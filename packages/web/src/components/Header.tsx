@@ -4,6 +4,7 @@ import { useGame, type Game } from "../context/GameContext";
 import { getRandomPlugin, getStatus } from "../api";
 import { GameSwitcher, VISIBLE_GAMES } from "./GameSwitcher";
 import { HeaderSearch } from "./HeaderSearch";
+import { pluginHref } from "../lib/links";
 
 type Theme = "dark" | "light";
 
@@ -37,7 +38,7 @@ export function Header() {
       new Promise((resolve) => setTimeout(resolve, 650)),
     ]);
     setRolling(false);
-    if (result) navigate(`/plugin/${result.id}`);
+    if (result) navigate(pluginHref(result.nameId, game));
   }
 
   useEffect(() => {

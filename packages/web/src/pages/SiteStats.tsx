@@ -21,6 +21,7 @@ import {
 import { DailyChart, formatTooltipDate } from "../components/DailyChart";
 import { Pagination } from "../components/Pagination";
 import { useGame, type Game } from "../context/GameContext";
+import { authorHref, pluginHref } from "../lib/links";
 
 type StatsTab = "overview" | "compare";
 
@@ -286,7 +287,7 @@ export function SiteStats() {
       </div>
 
       {tab === "overview" && (
-        <OverviewTab overview={overview} ecoRange={ecoRange} onEcoRange={setEcoRange} onOpenPlugin={(id) => navigate(`/plugin/${id}`)} />
+        <OverviewTab overview={overview} ecoRange={ecoRange} onEcoRange={setEcoRange} onOpenPlugin={(nameId) => navigate(pluginHref(nameId, game))} />
       )}
 
       {tab === "compare" && (
@@ -399,7 +400,7 @@ export function SiteStats() {
               onMetric={(m) => updateCompare({ metric: m })}
               onRange={(r) => updateCompare({ range: r })}
               focusId={focusId}
-              onOpen={(id) => navigate(cmpType === "plugin" ? `/plugin/${id}` : `/author/${id}`)}
+              onOpen={(nameId) => navigate(cmpType === "plugin" ? pluginHref(nameId, game) : authorHref(nameId, game))}
             />
           )}
         </div>
@@ -417,7 +418,7 @@ function OverviewTab({
   overview: StatsOverview | null;
   ecoRange: 30 | 90 | 365;
   onEcoRange: (r: 30 | 90 | 365) => void;
-  onOpenPlugin: (id: number) => void;
+  onOpenPlugin: (nameId: string) => void;
 }) {
   const { game } = useGame();
   const [catPage, setCatPage] = useState(1);
@@ -660,7 +661,7 @@ function OverviewTab({
               <span className="chart-range-text">This week vs last week</span>
             </div>
             {overview.fastestGrowing.map((g, i) => (
-              <div key={g.id} className="hot-row" onClick={() => onOpenPlugin(g.id)}>
+              <div key={g.id} className="hot-row" onClick={() => onOpenPlugin(g.nameId)}>
                 <span className="hot-rank">{i + 1}</span>
                 <span className="hot-name-col">
                   <span className="hot-name">{g.name}</span>
@@ -682,7 +683,7 @@ function OverviewTab({
               <span className="chart-range-text">Most recently published</span>
             </div>
             {overview.newReleases.map((r) => (
-              <div key={r.id} className="new-release-row" onClick={() => onOpenPlugin(r.id)}>
+              <div key={r.id} className="new-release-row" onClick={() => onOpenPlugin(r.nameId)}>
                 <span className="hot-name-col">
                   <span className="hot-name">{r.name}</span>
                   <span className="hot-sub">
@@ -731,7 +732,7 @@ function CompareResults({
   onMetric: (m: CompareMetric) => void;
   onRange: (r: CompareRangeKey) => void;
   focusId: number | null;
-  onOpen: (key: number) => void;
+  onOpen: (nameId: string) => void;
 }) {
   const { game } = useGame();
 
@@ -848,7 +849,7 @@ function CompareResults({
           <div className="cmp-head-row" style={{ gridTemplateColumns: cmpTableCols(result.items.length) }}>
             <span className="cmp-head-label">Side by side</span>
             {result.items.map((it, i) => (
-              <button key={it.key} className="cmp-head-cell" onClick={() => onOpen(it.key)}>
+              <button key={it.key} className="cmp-head-cell" onClick={() => onOpen(it.nameId)}>
                 <span className="cmp-head-bar" style={{ background: COMPARE_COLORS[i] }} />
                 <span className="cmp-head-name">{it.name}</span>
                 <span className="cmp-head-sub">{it.sub}</span>

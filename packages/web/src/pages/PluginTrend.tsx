@@ -5,6 +5,7 @@ import { TrendChart, trendMetrics, type ChartType, type TrendMetric } from "../c
 import { useGame } from "../context/GameContext";
 import { AvatarImg } from "../components/AvatarImg";
 import { slugifyTag } from "../lib/slug";
+import { authorHref, pluginHref } from "../lib/links";
 
 type RangePreset = "7d" | "30d" | "90d" | "all" | "custom";
 
@@ -36,7 +37,7 @@ function parsePreset(v: string | null): RangePreset {
 
 export function PluginTrend() {
   const { id } = useParams<{ id: string }>();
-  const { setGame } = useGame();
+  const { game, setGame } = useGame();
   const [searchParams, setSearchParams] = useSearchParams();
   const [plugin, setPlugin] = useState<PluginMeta | null>(null);
   const [points, setPoints] = useState<PluginTrendPoint[] | null>(null);
@@ -84,7 +85,7 @@ export function PluginTrend() {
 
   useEffect(() => {
     if (!id) return;
-    getPluginTrend(Number(id))
+    getPluginTrend(id, game)
       .then((res) => {
         setPlugin(res.plugin);
         setPoints(res.trend);
@@ -92,7 +93,7 @@ export function PluginTrend() {
 
         getTopPlugins("hot", res.plugin.game, 15)
           .then((hotRes) => {
-            const rank = hotRes.plugins.findIndex((p) => p.id === Number(id));
+            const rank = hotRes.plugins.findIndex((p) => p.id === res.pluginId);
             setHotRank(rank !== -1 && rank < 10 ? rank + 1 : null);
             setHotPlugins(hotRes.plugins);
           })
@@ -103,6 +104,7 @@ export function PluginTrend() {
           .catch(() => setAllPlugins([]));
       })
       .catch((err) => setError(String(err)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, setGame]);
 
   const allTimeRank = useMemo(() => {
@@ -300,7 +302,7 @@ export function PluginTrend() {
                         onMouseLeave={() => setHoveredAuthorIndex(null)}
                       >
                         {i > 0 && ", "}
-                        <Link to={`/author/${entry.authorId}`} className="plugin-author-name-link">
+                        <Link to={authorHref(entry.nameId, game)} className="plugin-author-name-link">
                           {entry.name}
                         </Link>
                       </span>
@@ -308,7 +310,7 @@ export function PluginTrend() {
                   </span>
                 </div>
               ) : (
-                <Link to={`/author/${plugin.authorId}`} className="plugin-author-chip">
+                <Link to={authorHref(plugin.authorNameId, game)} className="plugin-author-chip">
                   <span className="plugin-author-avatar">
                     {plugin.authorAvatarUrl ? (
                       <img src={plugin.authorAvatarUrl} alt="" className="plugin-author-avatar-img" />
@@ -503,7 +505,7 @@ export function PluginTrend() {
             </div>
             <div className="legal-body similar-plugins-modal-body">
               {similarPlugins.map(({ plugin: p, shared }) => (
-                <Link key={p.id} to={`/plugin/${p.id}`} className="similar-plugin-row" onClick={() => setShowSimilarModal(false)}>
+                <Link key={p.id} to={pluginHref(p.nameId, game)} className="similar-plugin-row" onClick={() => setShowSimilarModal(false)}>
                   <span className="similar-plugin-name">{p.name}</span>
                   <span className="similar-plugin-sub">
                     by {p.authorName} · {shared} shared tag{shared === 1 ? "" : "s"}

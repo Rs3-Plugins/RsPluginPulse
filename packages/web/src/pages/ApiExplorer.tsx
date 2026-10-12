@@ -5,6 +5,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Dropdown } from "../components/Dropdown";
 import { PluginAuthorPicker, type PickerItem } from "../components/PluginAuthorPicker";
 import { useGame } from "../context/GameContext";
+import { authorHref, pluginHref } from "../lib/links";
 
 type ParamType = "enum" | "int" | "string";
 type Tab = "body" | "headers" | "curl" | "fetch";
@@ -677,9 +678,9 @@ export function ApiExplorer() {
   const badgeImgUrl = badgeEndpointUrl ? `https://img.shields.io/endpoint?${shieldsParams.toString()}` : null;
   const badgePageUrl =
     bType === "plugin" && bPluginId !== null
-      ? `${window.location.origin}/plugin/${bPluginId}`
+      ? `${window.location.origin}${pluginHref(pluginList?.find((p) => p.id === bPluginId)?.nameId ?? String(bPluginId), game)}`
       : bType === "author" && bAuthorId !== null
-        ? `${window.location.origin}/author/${bAuthorId}`
+        ? `${window.location.origin}${authorHref(authorList?.find((a) => a.authorId === bAuthorId)?.nameId ?? String(bAuthorId), game)}`
         : "";
   const badgeAltText = `PluginPulse ${BADGE_LABELS[bMetric]}`;
   const badgeMarkdown = badgeImgUrl ? `[![${badgeAltText}](${badgeImgUrl})](${badgePageUrl})` : "";
@@ -799,9 +800,9 @@ export function ApiExplorer() {
   const eShortImgUrl = eShortId ? `${API_BASE}/api/card/${eShortId}.png` : null;
   const ePageUrl =
     eType === "plugin" && ePluginId !== null
-      ? `${window.location.origin}/plugin/${ePluginId}`
+      ? `${window.location.origin}${pluginHref(pluginList?.find((p) => p.id === ePluginId)?.nameId ?? String(ePluginId), game)}`
       : eType === "author" && eAuthorId !== null
-        ? `${window.location.origin}/author/${eAuthorId}`
+        ? `${window.location.origin}${authorHref(authorList?.find((a) => a.authorId === eAuthorId)?.nameId ?? String(eAuthorId), game)}`
         : "";
   const eMarkdown = eShortImgUrl ? `[![PluginPulse stats card](${eShortImgUrl})](${ePageUrl})` : "";
   const eHtml = eShortImgUrl

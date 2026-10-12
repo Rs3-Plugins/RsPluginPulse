@@ -6,6 +6,7 @@ export interface PluginLeaderboardRow {
   name: string;
   authorId: number;
   authorName: string;
+  authorNameId: string;
   authorAvatarUrl: string | null;
   profileUrl: string;
   tags: string[];
@@ -15,6 +16,7 @@ export interface PluginLeaderboardRow {
 export interface AuthorLeaderboardRow {
   authorId: number;
   authorName: string;
+  nameId: string;
   avatarUrl: string | null;
   pluginCount: number;
   value: number;
@@ -22,6 +24,7 @@ export interface AuthorLeaderboardRow {
 
 export interface SearchPluginRow {
   id: number;
+  nameId: string;
   name: string;
   author: string;
   authorAvatarUrl: string | null;
@@ -30,6 +33,7 @@ export interface SearchPluginRow {
 
 export interface SearchAuthorRow {
   id: number;
+  nameId: string;
   name: string;
   avatarUrl: string | null;
   pluginCount: number;
@@ -47,6 +51,7 @@ export interface NewestPluginRow {
   name: string;
   authorId: number;
   authorName: string;
+  authorNameId: string;
   profileUrl: string;
   tags: string[];
   logoUrl: string | null;
@@ -68,6 +73,7 @@ export interface FastestGrowingPlugin {
   name: string;
   authorId: number;
   authorName: string;
+  authorNameId: string;
   profileUrl: string;
   downloadsTotal: number;
   subscribersTotal: number;
@@ -95,6 +101,7 @@ export interface CoAuthorIngest {
 
 export interface CoAuthor {
   authorId: number;
+  nameId: string;
   name: string;
   avatarUrl: string | null;
   profileUrl: string | null;
@@ -208,6 +215,7 @@ export interface CategoryStatsPage {
 
 export interface GrowthSparkRow {
   id: number;
+  nameId: string;
   name: string;
   authorId: number;
   authorName: string;
@@ -217,6 +225,7 @@ export interface GrowthSparkRow {
 
 export interface NewReleaseRow {
   id: number;
+  nameId: string;
   name: string;
   authorId: number;
   authorName: string;
@@ -259,6 +268,7 @@ export interface CompareItemStats {
 
 export interface CompareItem {
   key: number;
+  nameId: string;
   name: string;
   sub: string;
   series: number[];

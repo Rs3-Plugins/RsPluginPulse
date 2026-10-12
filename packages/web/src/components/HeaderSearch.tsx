@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { search as searchApi, type SearchAuthorRow, type SearchPluginRow } from "../api";
 import { useGame } from "../context/GameContext";
+import { authorHref, pluginHref } from "../lib/links";
 import { highlight, initials, SearchBox, type SearchBoxGroup, type SearchBoxItem } from "./SearchBox";
 
 interface FlatItem {
@@ -76,10 +77,10 @@ export function HeaderSearch() {
   const flatItems = useMemo<FlatItem[]>(() => {
     if (!result) return [];
     return [
-      ...result.plugins.map((p) => ({ href: `/plugin/${p.id}` })),
-      ...result.authors.map((a) => ({ href: `/author/${a.id}` })),
+      ...result.plugins.map((p) => ({ href: pluginHref(p.nameId, game) })),
+      ...result.authors.map((a) => ({ href: authorHref(a.nameId, game) })),
     ];
-  }, [result]);
+  }, [result, game]);
 
   function closePalette() {
     setPaletteOpen(false);
@@ -166,7 +167,7 @@ export function HeaderSearch() {
       name: p.name,
       sub: `by ${p.author}`,
       value: formatCompact(p.total),
-      href: `/plugin/${p.id}`,
+      href: pluginHref(p.nameId, game),
     }));
     const authorItems: SearchBoxItem[] = result.authors.map((a) => ({
       id: a.id,
@@ -174,13 +175,13 @@ export function HeaderSearch() {
       sub: `${a.pluginCount} plugin${a.pluginCount === 1 ? "" : "s"}`,
       value: formatCompact(a.total),
       avatarUrl: a.avatarUrl,
-      href: `/author/${a.id}`,
+      href: authorHref(a.nameId, game),
     }));
     return [
       { label: pluginGroupLabel, items: pluginItems },
       { label: authorGroupLabel, items: authorItems },
     ];
-  }, [result, pluginGroupLabel, authorGroupLabel]);
+  }, [result, pluginGroupLabel, authorGroupLabel, game]);
 
   function renderPaletteRows() {
     if (!result) return null;
@@ -188,7 +189,7 @@ export function HeaderSearch() {
     const pluginRows = result.plugins.map((p) => {
       index += 1;
       const i = index;
-      const href = `/plugin/${p.id}`;
+      const href = pluginHref(p.nameId, game);
       return (
         <a
           key={`plugin-${p.id}`}
@@ -214,7 +215,7 @@ export function HeaderSearch() {
     const authorRows = result.authors.map((a) => {
       index += 1;
       const i = index;
-      const href = `/author/${a.id}`;
+      const href = authorHref(a.nameId, game);
       return (
         <a
           key={`author-${a.id}`}

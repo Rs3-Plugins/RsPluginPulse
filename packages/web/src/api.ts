@@ -8,6 +8,7 @@ export interface PluginLeaderboardRow {
   name: string;
   authorId: number;
   authorName: string;
+  authorNameId: string;
   authorAvatarUrl: string | null;
   profileUrl: string;
   tags: string[];
@@ -17,6 +18,7 @@ export interface PluginLeaderboardRow {
 export interface AuthorLeaderboardRow {
   authorId: number;
   authorName: string;
+  nameId: string;
   avatarUrl: string | null;
   pluginCount: number;
   value: number;
@@ -24,6 +26,7 @@ export interface AuthorLeaderboardRow {
 
 export interface SearchPluginRow {
   id: number;
+  nameId: string;
   name: string;
   author: string;
   authorAvatarUrl: string | null;
@@ -32,6 +35,7 @@ export interface SearchPluginRow {
 
 export interface SearchAuthorRow {
   id: number;
+  nameId: string;
   name: string;
   avatarUrl: string | null;
   pluginCount: number;
@@ -49,6 +53,7 @@ export interface FastestGrowingPlugin {
   name: string;
   authorId: number;
   authorName: string;
+  authorNameId: string;
   profileUrl: string;
   downloadsTotal: number;
   subscribersTotal: number;
@@ -67,6 +72,7 @@ export interface PluginTrendPoint {
 
 export interface CoAuthor {
   authorId: number;
+  nameId: string;
   name: string;
   avatarUrl: string | null;
   profileUrl: string | null;
@@ -79,6 +85,7 @@ export interface PluginMeta {
   name: string;
   authorId: number;
   authorName: string;
+  authorNameId: string;
   authorAvatarUrl: string | null;
   coAuthors: CoAuthor[];
   profileUrl: string;
@@ -133,6 +140,7 @@ export interface NewestPluginRow {
   name: string;
   authorId: number;
   authorName: string;
+  authorNameId: string;
   profileUrl: string;
   tags: string[];
   logoUrl: string | null;
@@ -169,6 +177,7 @@ export interface CategoryStatsPage {
 
 export interface GrowthSparkRow {
   id: number;
+  nameId: string;
   name: string;
   authorId: number;
   authorName: string;
@@ -178,6 +187,7 @@ export interface GrowthSparkRow {
 
 export interface NewReleaseRow {
   id: number;
+  nameId: string;
   name: string;
   authorId: number;
   authorName: string;
@@ -220,6 +230,7 @@ export interface CompareItemStats {
 
 export interface CompareItem {
   key: number;
+  nameId: string;
   name: string;
   sub: string;
   series: number[];
@@ -250,12 +261,17 @@ export function getTopAuthors(period: Period, game: Game = "rs3", limit = 10000)
   return getJson<{ period: Period; authors: AuthorLeaderboardRow[] }>(`/api/leaderboard/authors?period=${period}&limit=${limit}&game=${game}`);
 }
 
-export function getPluginTrend(pluginId: number) {
-  return getJson<{ pluginId: number; plugin: PluginMeta; trend: PluginTrendPoint[] }>(`/api/plugins/${pluginId}/trend`);
+// `id` may be a numeric id (globally unique, no game needed) or a pretty
+// slug ("117hd") -- slugs are only unique per game, so `game` matters for
+// those. Always sent; the API ignores it for a numeric id.
+export function getPluginTrend(id: string | number, game: Game = "rs3") {
+  return getJson<{ pluginId: number; plugin: PluginMeta; trend: PluginTrendPoint[] }>(
+    `/api/plugins/${encodeURIComponent(id)}/trend?game=${game}`,
+  );
 }
 
-export function getAuthorProfile(authorId: number) {
-  return getJson<AuthorProfile>(`/api/authors/${authorId}`);
+export function getAuthorProfile(id: string | number, game: Game = "rs3") {
+  return getJson<AuthorProfile>(`/api/authors/${encodeURIComponent(id)}?game=${game}`);
 }
 
 export function search(query: string, game: Game = "rs3", limit?: number) {
@@ -273,7 +289,7 @@ export function getFastestGrowingPlugins(limit = 5, days = 7, game: Game = "rs3"
 }
 
 export function getRandomPlugin(game: Game = "rs3") {
-  return getJson<{ id: number }>(`/api/plugins/random?game=${game}`);
+  return getJson<{ id: number; nameId: string }>(`/api/plugins/random?game=${game}`);
 }
 
 export function getNewestPlugins(limit = 50, game: Game = "rs3") {
