@@ -4,12 +4,18 @@
 //
 //   1. Import the dump: downsample its per-plugin install_counts history
 //      to one reading per (plugin, UTC hour) -- the last reading of that
-//      hour -- skipping today (the dump is always somewhat stale by the
-//      time you run this) and any hour we already have a snapshot for.
-//      Hour-level (not day-level) so this also backfills a plugin that's
-//      missing a handful of hours inside a day that otherwise has
+//      hour, inserted at that hour's exact top-of-hour timestamp -- and
+//      skip today (the dump is always somewhat stale by the time you run
+//      this). Hour-level (not day-level) so this also backfills a plugin
+//      that's missing a handful of hours inside a day that otherwise has
 //      coverage -- a whole-day gap just ends up filling all 24 of its
-//      hours instead of one.
+//      hours instead of one. "Already have a snapshot for this hour" is
+//      decided entirely by the database's own ON CONFLICT (plugin_id,
+//      captured_at) DO NOTHING, not an in-memory set -- an earlier version
+//      tracked every (plugin, hour) pair seen in a Set to skip duplicates,
+//      which grew past tens of millions of entries against a sparsely-
+//      covered catalog and blew through V8's hard Set-size ceiling,
+//      killing the import outright.
 //   2. Catch up today: a dump is only ever current as of whenever it was
 //      generated, so phase 2 asks phyce's own /plugins endpoint (one
 //      request, current state for every plugin -- NOT the per-plugin
@@ -181,33 +187,28 @@ async function main() {
   }
   console.log(`  matched ${phyceIdToOurId.size} of them to our own catalog`);
 
-  const ourIds = Array.from(new Set(phyceIdToOurId.values()));
-  const { rows: existingRows } = await pool.query(
-    `SELECT plugin_id, to_char(date_trunc('hour', captured_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24') AS hour
-     FROM plugin_snapshots WHERE plugin_id = ANY($1)`,
-    [ourIds],
-  );
-  const existingHours = new Set(existingRows.map((r) => `${r.plugin_id}|${r.hour}`));
-  console.log(`  ${existingHours.size} (plugin, hour) pairs already covered -- these will be skipped`);
-
   const today = new Date().toISOString().slice(0, 10);
-  // Hour-level dedup means a sparsely-covered catalog (e.g. a VPS whose
-  // ingest timer only started recently) can have nearly every row in a
-  // multi-GB dump be "pending" at once -- holding millions of full row
-  // objects in memory until the very end OOMs. `pending` is flushed to the
-  // DB (and cleared) every FLUSH_EVERY rows to keep peak memory bounded
-  // regardless of dump size; `flushedKeys` is just the (cheap) key strings
-  // of everything already written, so a hour seen again later in the file
-  // is still correctly skipped instead of double-inserted.
+  // Dedup is done entirely via the DB's own ON CONFLICT (plugin_id,
+  // captured_at) DO NOTHING -- not an in-memory "already covered" Set.
+  // An earlier version tracked every (plugin, hour) pair ever seen in a
+  // Set to skip re-inserting it, both for pre-existing DB coverage and
+  // across flush batches within this same run; against a sparsely-covered
+  // catalog that Set grew past tens of millions of entries and blew
+  // through V8's hard Set-size ceiling ("Set maximum size exceeded"),
+  // killing the import outright. `pending` only ever needs to collapse
+  // repeat readings for the same hour *within the current batch* (last
+  // reading of the hour wins there); letting Postgres's own unique index
+  // catch everything else -- pre-existing rows, and rows written by an
+  // earlier batch in this same run -- means nothing in memory grows
+  // without bound regardless of dump size or how little history already
+  // existed.
   const FLUSH_EVERY = 200_000;
-  const flushedKeys = new Set<string>();
   let pending = new Map<string, { pluginId: number; capturedAt: string; count: number }>();
   let inserted = 0;
 
   async function flushPending() {
     if (pending.size === 0) return;
     const toInsert = Array.from(pending.values());
-    for (const key of pending.keys()) flushedKeys.add(key);
     pending = new Map();
     inserted += await insertRows(pool, toInsert);
   }
@@ -230,8 +231,16 @@ async function main() {
     matchedCount++;
     const hour = time.slice(0, 2);
     const key = `${ourId}|${day}T${hour}`;
-    if (existingHours.has(key) || flushedKeys.has(key)) continue;
-    pending.set(key, { pluginId: ourId, capturedAt: `${day}T${time}Z`, count });
+    // Truncated to the hour (not the dump's raw second-precision reading)
+    // so the same (plugin, hour) always produces the exact same
+    // captured_at -- that's what lets ON CONFLICT DO NOTHING actually
+    // catch a duplicate, whether it's a row this same run already wrote
+    // in an earlier batch or one a previous run of this script wrote. It
+    // won't catch a dump hour that's already covered by *real* hourly
+    // ingest, since that lands on its own non-round second -- a small,
+    // bounded amount of redundant overlap for whatever recent window the
+    // dump and real ingest both cover, not a correctness problem.
+    pending.set(key, { pluginId: ourId, capturedAt: `${day}T${hour}:00:00.000Z`, count });
     if (pending.size >= FLUSH_EVERY) await flushPending();
     if (lineCount % 5_000_000 === 0) console.log(`  ...${lineCount.toLocaleString()} lines scanned, ${inserted.toLocaleString()} inserted so far`);
   }
