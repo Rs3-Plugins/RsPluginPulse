@@ -26,7 +26,7 @@ export function Footer() {
               className="footer-discord pp-tip pp-tip--up"
               data-tooltip="Get help on the PluginPulse Discord"
             >
-              <DiscordIcon />
+              <img src="/icons/game-controller.svg" alt="" width={14} height={14} />
               Support ↗
             </a>
             <a
@@ -58,17 +58,6 @@ export function Footer() {
 
       {legalDoc && <LegalModal doc={legalDoc} onClose={() => setLegalDoc(null)} />}
     </footer>
-  );
-}
-
-function DiscordIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2 4.6c0-1.16.94-2.1 2.1-2.1h7.8c1.16 0 2.1.94 2.1 2.1V9.4c0 1.16-.94 2.1-2.1 2.1H7l-2.8 2.6v-2.6H4.1C2.94 11.5 2 10.56 2 9.4V4.6Z" />
-      <circle cx="5.6" cy="7" r="0.55" fill="currentColor" stroke="none" />
-      <circle cx="8" cy="7" r="0.55" fill="currentColor" stroke="none" />
-      <circle cx="10.4" cy="7" r="0.55" fill="currentColor" stroke="none" />
-    </svg>
   );
 }
 

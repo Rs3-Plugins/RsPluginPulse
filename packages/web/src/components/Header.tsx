@@ -118,7 +118,7 @@ export function Header() {
             data-tooltip="Add the PluginPulse bot to your Discord server"
             aria-label="Add the PluginPulse bot to your Discord server"
           >
-            <DiscordIcon />
+            <img src="/icons/game-controller.svg" alt="" width={15} height={15} />
             Add to Discord
           </a>
           <span className="pp-divider" aria-hidden="true" />
@@ -192,7 +192,7 @@ export function Header() {
             })}
             <a className="pp-drawer__discord" href="https://discord.gg/gHN7c9B5FU" target="_blank" rel="noopener">
               <span className="pp-drawer__plus">
-                <DiscordIcon />
+                <img src="/icons/game-controller.svg" alt="" width={18} height={18} />
               </span>
               <span>
                 <b>Add to Discord</b>
@@ -248,17 +248,6 @@ export function Header() {
         </div>
       )}
     </header>
-  );
-}
-
-function DiscordIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M2 4.6c0-1.16.94-2.1 2.1-2.1h7.8c1.16 0 2.1.94 2.1 2.1V9.4c0 1.16-.94 2.1-2.1 2.1H7l-2.8 2.6v-2.6H4.1C2.94 11.5 2 10.56 2 9.4V4.6Z" />
-      <circle cx="5.6" cy="7" r="0.55" fill="currentColor" stroke="none" />
-      <circle cx="8" cy="7" r="0.55" fill="currentColor" stroke="none" />
-      <circle cx="10.4" cy="7" r="0.55" fill="currentColor" stroke="none" />
-    </svg>
   );
 }
 
