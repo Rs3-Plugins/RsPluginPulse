@@ -15,10 +15,24 @@ name: Weekly Wiki Game Updates
 # idempotent, so re-checking the other wiki is a harmless no-op) -- that
 # way a late write-up on either wiki still gets picked up on the next run
 # instead of being missed until the following week.
+#
+# Also doubles as the special-events sync (folded in from the old, separate
+# Sync Special Events workflow): packages/ingest/data/special-events.json is
+# hand-edited (Leagues seasons, Fresh Start Worlds, betas, etc. -- see that
+# file's README), not scraped. Editing it and pushing to main syncs it
+# straight to the special_events table by scp'ing just that file onto the
+# currently-active release and running the wholesale-replace ingest script
+# -- no full API build/deploy needed. (The next real deploy via
+# deploy-api.yml picks up the committed JSON from a fresh checkout as
+# usual, so this out-of-band copy never goes stale or diverges from git.)
 on:
   schedule:
     - cron: "0 17 * * 1" # Monday 17:00 UTC -- after RS3's weekly update
     - cron: "0 17 * * 3" # Wednesday 17:00 UTC -- after OSRS's weekly update
+  push:
+    branches: [main]
+    paths:
+      - "packages/ingest/data/special-events.json"
   workflow_dispatch:
 
 concurrency:
@@ -31,6 +45,8 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Configure SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -56,7 +72,30 @@ jobs:
           fi
           chmod 600 ~/.ssh/known_hosts
 
+      # Only on the push that actually changed the file (or a manual run) --
+      # the scheduled runs have nothing new to upload.
+      - name: Upload special-events.json and sync
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
+        run: |
+          set -euo pipefail
+          scp -P "$SSH_PORT" packages/ingest/data/special-events.json "$SSH_USER@$SSH_HOST:/tmp/special-events.json"
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" bash -s <<'EOF'
+            set -euo pipefail
+            install -m 644 /tmp/special-events.json /srv/rspluginpulse/current/packages/ingest/data/special-events.json
+            rm -f /tmp/special-events.json
+            cd /srv/rspluginpulse/current
+            set -a; source /srv/rspluginpulse/shared/.env; set +a
+            npm run ingest:special-events -w @rspluginpulse/ingest
+          EOF
+
+      # Only on the schedule (or a manual run) -- a push that only touched
+      # special-events.json has no new wiki updates to check for.
       - name: Run wiki-updates ingest on the server
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
@@ -66,6 +105,7 @@ jobs:
           ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" bash -s <<'EOF'
             set -uo pipefail
             cd /srv/rspluginpulse/current
+            set -a; source /srv/rspluginpulse/shared/.env; set +a
             npm run ingest:wiki-updates -w @rspluginpulse/ingest
             status=$?
             if [ "$status" -ne 0 ]; then

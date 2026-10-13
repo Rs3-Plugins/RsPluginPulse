@@ -1,4 +1,4 @@
-name: Run Ingest
+name: Manual Plugin Data Ingest
 
 # Manual-only: run from the Actions tab (Run workflow) whenever you want a
 # fresh mod.io/RuneLite snapshot before the 1h timer on the server fires on
