@@ -124,6 +124,8 @@ ${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl start rspluginpulse-api, \\
   /usr/bin/systemctl stop rspluginpulse-api, \\
   /usr/bin/systemctl restart rspluginpulse-api, \\
   /usr/bin/systemctl enable rspluginpulse-api, \\
+  /usr/bin/systemctl restart rspluginpulse-discord-bot, \\
+  /usr/bin/systemctl enable rspluginpulse-discord-bot, \\
   /usr/bin/systemctl restart rspluginpulse-ingest, \\
   /usr/bin/systemctl reload nginx, \\
   /usr/sbin/nginx -t

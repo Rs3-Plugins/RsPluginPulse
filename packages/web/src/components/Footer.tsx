@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { getStatus } from "../api";
 import type { Game } from "../context/GameContext";
-import { LegalModal, type LegalDoc } from "./LegalModal";
 
 // Must track deploy/configure.sh's INGEST_INTERVAL (defaults to 1h there) --
 // the frontend has no way to read that server-side cron config directly, so
@@ -43,7 +43,6 @@ function formatNextRefreshTime(lastUpdatedMs: number): string {
 }
 
 export function Footer() {
-  const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null);
   const runescapeNext = useNextRefresh("runescape");
   const runeliteNext = useNextRefresh("runelite");
 
@@ -82,15 +81,15 @@ export function Footer() {
               <CoffeeIcon />
               Buy me a coffee ↗
             </a>
-            <button className="footer-link" onClick={() => setLegalDoc("cookies")}>
+            <Link to="/cookies" className="footer-link">
               Cookie policy
-            </button>
-            <button className="footer-link" onClick={() => setLegalDoc("privacy")}>
+            </Link>
+            <Link to="/privacy" className="footer-link">
               Privacy policy
-            </button>
-            <button className="footer-link" onClick={() => setLegalDoc("terms")}>
+            </Link>
+            <Link to="/terms" className="footer-link">
               Terms of use
-            </button>
+            </Link>
           </nav>
         </div>
         <div className="site-footer-bottom">
@@ -101,8 +100,6 @@ export function Footer() {
           </span>
         </div>
       </div>
-
-      {legalDoc && <LegalModal doc={legalDoc} onClose={() => setLegalDoc(null)} />}
     </footer>
   );
 }

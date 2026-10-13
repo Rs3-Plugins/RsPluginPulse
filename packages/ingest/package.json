@@ -8,6 +8,7 @@
     "ingest:wiki-updates": "tsx src/run-wiki-updates.ts",
     "ingest:special-events": "tsx src/run-special-events.ts",
     "ingest:releases": "tsx src/run-release-ingest.ts",
+    "ingest:releases-hourly": "tsx src/run-release-ingest-hourly.ts",
     "fetch:phyce-dump": "tsx src/fetch-phyce-dump.ts",
     "import:phyce": "tsx src/import-phyce-dump.ts",
     "backfill:releases": "tsx src/backfill-releases.ts"

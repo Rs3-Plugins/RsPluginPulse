@@ -1,43 +1,27 @@
+// Shared by LegalPage.tsx (the real /terms, /privacy, /cookies routes --
+// needed so there's an actual stable URL to hand to Discord's Developer
+// Portal Terms of Service/Privacy Policy fields and anything else that
+// asks for one, not just an in-app modal with no URL of its own) and any
+// future in-app quick-view of the same text. One copy of the actual legal
+// wording, not duplicated between a page and a modal.
 export type LegalDoc = "cookies" | "privacy" | "terms";
 
-const TITLES: Record<LegalDoc, string> = {
+export const LEGAL_TITLES: Record<LegalDoc, string> = {
   cookies: "Cookie policy",
   privacy: "Privacy policy",
   terms: "Terms of use",
 };
 
-interface Props {
-  doc: LegalDoc;
-  onClose: () => void;
-}
+export const LEGAL_DESCRIPTIONS: Record<LegalDoc, string> = {
+  cookies: "How RuneScape PluginPulse uses cookies and browser storage.",
+  privacy: "RuneScape PluginPulse's privacy policy — what data we collect and how it's used.",
+  terms: "Terms of use for RuneScape PluginPulse, an independent RuneScape/RuneLite plugin statistics site.",
+};
 
-export function LegalModal({ doc, onClose }: Props) {
-  return (
-    <div className="legal-overlay" onClick={onClose}>
-      <div role="dialog" aria-modal="true" className="legal-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="card-edge" />
-        <div className="legal-dialog-header">
-          <div>
-            <h2>{TITLES[doc]}</h2>
-            <div className="legal-dialog-meta">rspluginpulse.com · Last updated Oct 12, 2026</div>
-          </div>
-          <button className="legal-close" aria-label="Close" onClick={onClose}>
-            ×
-          </button>
-        </div>
-        <div className="legal-body">
-          {doc === "cookies" && <CookiesBody />}
-          {doc === "privacy" && <PrivacyBody />}
-          {doc === "terms" && <TermsBody />}
-        </div>
-        <div className="legal-dialog-footer">
-          <button className="legal-ok" onClick={onClose}>
-            Got it
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+export function LegalBody({ doc }: { doc: LegalDoc }) {
+  if (doc === "cookies") return <CookiesBody />;
+  if (doc === "privacy") return <PrivacyBody />;
+  return <TermsBody />;
 }
 
 function CookiesBody() {
@@ -48,6 +32,10 @@ function CookiesBody() {
       <ul>
         <li>
           <strong>Essential:</strong> remembers your light or dark theme and your leaderboard filters. Stored in your browser only.
+        </li>
+        <li>
+          <strong>Discord dashboard session:</strong> if you log in with Discord at /discord, a session cookie keeps you signed in. Only
+          set when you choose to log in, and cleared when you log out or it expires.
         </li>
         <li>
           <strong>Analytics (optional):</strong> privacy-friendly, aggregated page-view counts so we know which pages are useful. No
@@ -76,6 +64,20 @@ function PrivacyBody() {
         Plugin names, author names and download, install and subscriber counts are taken from public mod.io listings (RuneScape) and the
         RuneLite plugin hub (RuneLite). If you're an author and want your profile hidden from PluginPulse, contact us on Discord.
       </p>
+      <h3>Discord bot &amp; dashboard</h3>
+      <p>
+        If you log in with Discord at /discord, we store your Discord user ID, username and avatar in a session so the dashboard knows
+        who's signed in. To show which servers you can manage, we ask Discord for your server list and your permissions there at the
+        time you view it — that list isn't stored beyond your active session.
+      </p>
+      <p>
+        Per-server bot settings (nickname, avatar) are sent straight to Discord's own systems when you save them; we don't keep a copy.
+        You can revoke PluginPulse's access at any time from Discord's own{" "}
+        <a href="https://discord.com/settings/authorized-apps" target="_blank" rel="noopener">
+          Authorized Apps
+        </a>{" "}
+        settings.
+      </p>
       <h3>Sharing</h3>
       <p>We don't sell or share personal data. Hosting and analytics providers process data only to run the site.</p>
       <h3>Contact</h3>
@@ -100,10 +102,16 @@ function TermsBody() {
       </p>
       <h3>Data accuracy</h3>
       <p>Statistics are collected from mod.io and the RuneLite plugin hub on a schedule and may be delayed, incomplete or wrong. The site is provided as is, without warranties of any kind.</p>
+      <h3>Discord bot &amp; dashboard</h3>
+      <p>
+        The PluginPulse Discord bot and /discord dashboard are optional and not affiliated with, endorsed or sponsored by Discord Inc.
+        Using them means granting the bot and dashboard the Discord permissions you choose during login/install, which you can revoke at
+        any time from Discord's own settings. Some dashboard features may require a paid subscription in future; none are live yet.
+      </p>
       <h3>Acceptable use</h3>
       <ul>
         <li>Don't overload the site with automated requests or scraping.</li>
-        <li>Don't try to break, probe or bypass site security.</li>
+        <li>Don't try to break, probe or bypass site or bot security.</li>
         <li>Linking to and sharing pages is welcome.</li>
       </ul>
       <h3>Changes</h3>

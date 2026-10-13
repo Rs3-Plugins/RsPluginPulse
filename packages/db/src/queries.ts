@@ -3,6 +3,7 @@ import { getPool } from "./client";
 import { normalizeSlug, slugify } from "./slug";
 import type {
   AnnotationGameKey,
+  AnnouncementCandidate,
   AuthorLeaderboardRow,
   AuthorProfile,
   CategoryStat,
@@ -13,6 +14,19 @@ import type {
   CompareRange,
   CompareResult,
   CompareType,
+  DiscordAnnouncementKind,
+  DiscordAnnouncementWatch,
+  DiscordAnnouncementWatchInput,
+  DiscordChannelTopic,
+  DiscordChannelTopicInput,
+  DiscordEntityAnnouncement,
+  DiscordEntityAnnouncementInput,
+  DiscordEntityAnnouncementKind,
+  DiscordEntityKind,
+  DiscordGuildAdmin,
+  DiscordGuildAnnouncementEmbed,
+  DiscordGuildSubscription,
+  DiscordSession,
   EmbedCardConfig,
   EmbedCardOptions,
   EmbedCardType,
@@ -29,6 +43,7 @@ import type {
   PluginReleaseInput,
   PluginTrendPoint,
   SearchResult,
+  SiteAdmin,
   SiteStats,
   SpecialEvent,
   SpecialEventInput,
@@ -183,25 +198,55 @@ export async function getRandomPluginId(game = "runescape"): Promise<{ id: numbe
 // the first, in author_id order (lowest id keeps the bare slug). Ordering
 // by author_id rather than query order keeps the assignment stable across
 // calls instead of depending on incidental row order.
+// getAuthorSlugMap is called from roughly a dozen places below (every
+// leaderboard row, plugin/author detail page, newest-plugins list,
+// compare, and slug resolution itself all need it to decorate a row with
+// its author's nameId, or to resolve one) -- without caching, every one
+// of those re-ran this full plugin_authors x plugins join plus an
+// in-Node slugify/collision pass over *every* author in the game, often
+// more than once per page load. A short TTL (not invalidate-on-write)
+// because packages/ingest -- the only thing that actually changes this
+// data -- runs as a separate process with no way to reach into this
+// one's memory; ingest only runs hourly anyway, so a few minutes of
+// staleness here is unnoticeable in practice.
+const AUTHOR_SLUG_MAP_CACHE_MS = 5 * 60 * 1000;
+const authorSlugMapCache = new Map<string, { value: Map<number, string>; expiresAt: number }>();
+const authorSlugMapInFlight = new Map<string, Promise<Map<number, string>>>();
+
 async function getAuthorSlugMap(game: string): Promise<Map<number, string>> {
-  const pool = getPool();
-  const { rows } = await pool.query(
-    `SELECT DISTINCT pa.author_id, pa.author_name
-     FROM plugin_authors pa
-     JOIN plugins p ON p.id = pa.plugin_id
-     WHERE p.game = $1
-     ORDER BY pa.author_id ASC`,
-    [game],
-  );
-  const seen = new Map<string, number>();
-  const map = new Map<number, string>();
-  for (const row of rows) {
-    const base = slugify(row.author_name) || "author";
-    const count = (seen.get(base) ?? 0) + 1;
-    seen.set(base, count);
-    map.set(row.author_id, count === 1 ? base : `${base}-${count}`);
-  }
-  return map;
+  const cached = authorSlugMapCache.get(game);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const inFlight = authorSlugMapInFlight.get(game);
+  if (inFlight) return inFlight;
+
+  const loading = (async () => {
+    try {
+      const pool = getPool();
+      const { rows } = await pool.query(
+        `SELECT DISTINCT pa.author_id, pa.author_name
+         FROM plugin_authors pa
+         JOIN plugins p ON p.id = pa.plugin_id
+         WHERE p.game = $1
+         ORDER BY pa.author_id ASC`,
+        [game],
+      );
+      const seen = new Map<string, number>();
+      const map = new Map<number, string>();
+      for (const row of rows) {
+        const base = slugify(row.author_name) || "author";
+        const count = (seen.get(base) ?? 0) + 1;
+        seen.set(base, count);
+        map.set(row.author_id, count === 1 ? base : `${base}-${count}`);
+      }
+      authorSlugMapCache.set(game, { value: map, expiresAt: Date.now() + AUTHOR_SLUG_MAP_CACHE_MS });
+      return map;
+    } finally {
+      authorSlugMapInFlight.delete(game);
+    }
+  })();
+  authorSlugMapInFlight.set(game, loading);
+  return loading;
 }
 
 // Newest plugins first -- unlike the leaderboards, this intentionally
@@ -236,6 +281,17 @@ export async function getNewestPlugins(limit = 50, game = "runescape"): Promise<
   }));
 }
 
+// Plugin count per game -- just the one number per game key actually
+// stored (currently "runescape" and "runelite"; see schema.sql's `plugins`
+// table), used for the Discord bot's own global presence text rather than
+// anything web-facing (getSiteStats above is the per-game equivalent for
+// the site itself).
+export async function getPluginCountsByGame(): Promise<Record<string, number>> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT game, count(*)::int AS n FROM plugins GROUP BY game`);
+  return Object.fromEntries(rows.map((r) => [r.game as string, r.n as number]));
+}
+
 export async function getSiteStats(game = "runescape"): Promise<SiteStats> {
   const pool = getPool();
   const { rows } = await pool.query(
@@ -252,7 +308,7 @@ export async function getSiteStats(game = "runescape"): Promise<SiteStats> {
           JOIN LATERAL (SELECT subscribers_total FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1) l ON true
           WHERE p.game = $1
        ) AS subscribers_total,
-       (SELECT max(s.captured_at) FROM plugin_snapshots s JOIN plugins p ON p.id = s.plugin_id WHERE p.game = $1) AS updated_at`,
+       (SELECT max(s.captured_at) FROM plugin_snapshots s WHERE s.game = $1) AS updated_at`,
     [game],
   );
   const row = rows[0];
@@ -265,78 +321,145 @@ export async function getSiteStats(game = "runescape"): Promise<SiteStats> {
   };
 }
 
+// Bulk-upserts the whole batch in 3 statements instead of ~4 round trips
+// per plugin (one INSERT ON CONFLICT each for plugins/plugin_snapshots,
+// plus a DELETE+INSERT per co-author for plugin_authors) -- that loop
+// measured ~3.3s for a real 2621-plugin RuneLite run even against a local
+// database; every extra millisecond of network latency to a real hosted
+// Postgres multiplies across ~11,000 sequential round trips.
+//
+// `plugins.tags` is itself an array column, which is exactly the case
+// unnest() can't express row-aligned with the other columns (it flattens
+// nested arrays instead of keeping one array per row) -- json_to_recordset
+// sidesteps that entirely since each JSON object's own "tags" field is
+// just a plain JSON array, mapped straight to a Postgres text[]. The
+// plugin_snapshots insert has no array columns, so a plain unnest() over
+// parallel arrays works fine there.
 export async function upsertPluginsAndSnapshot(mods: IngestedMod[], capturedAt: Date): Promise<void> {
+  if (mods.length === 0) return;
   const pool = getPool();
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    for (const mod of mods) {
-      await client.query(
-        `INSERT INTO plugins (id, game, name_id, name, author_id, author_name, author_profile_url, author_avatar_url, profile_url, tags, logo_url, summary, ratings_total, ratings_positive, ratings_negative, ratings_percentage_positive, ratings_display_text, date_added, date_updated)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, to_timestamp($18), to_timestamp($19))
-         ON CONFLICT (id) DO UPDATE SET
-           name_id = EXCLUDED.name_id,
-           name = EXCLUDED.name,
-           author_id = EXCLUDED.author_id,
-           author_name = EXCLUDED.author_name,
-           author_profile_url = EXCLUDED.author_profile_url,
-           author_avatar_url = EXCLUDED.author_avatar_url,
-           profile_url = EXCLUDED.profile_url,
-           tags = EXCLUDED.tags,
-           logo_url = EXCLUDED.logo_url,
-           summary = EXCLUDED.summary,
-           ratings_total = EXCLUDED.ratings_total,
-           ratings_positive = EXCLUDED.ratings_positive,
-           ratings_negative = EXCLUDED.ratings_negative,
-           ratings_percentage_positive = EXCLUDED.ratings_percentage_positive,
-           ratings_display_text = EXCLUDED.ratings_display_text,
-           date_updated = EXCLUDED.date_updated`,
-        [
-          mod.id,
-          mod.game,
-          mod.nameId,
-          mod.name,
-          mod.authorId,
-          mod.authorName,
-          mod.authorProfileUrl,
-          mod.authorAvatarUrl,
-          mod.profileUrl,
-          mod.tags,
-          mod.logoUrl,
-          mod.summary,
-          mod.ratingsTotal,
-          mod.ratingsPositive,
-          mod.ratingsNegative,
-          mod.ratingsPercentagePositive,
-          mod.ratingsDisplayText,
-          mod.dateAdded,
-          mod.dateUpdated,
-        ],
-      );
-      await client.query(
-        `INSERT INTO plugin_snapshots (plugin_id, captured_at, downloads_total, downloads_today, subscribers_total, popularity_rank_position, game, date_updated)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8))
-         ON CONFLICT (plugin_id, captured_at) DO NOTHING`,
-        [mod.id, capturedAt, mod.downloadsTotal, mod.downloadsToday, mod.subscribersTotal, mod.popularityRankPosition, mod.game, mod.dateUpdated],
-      );
 
-      // Replace the roster wholesale each run -- cheap at this scale and
-      // avoids tracking additions/removals/reordering between ingests.
-      await client.query(`DELETE FROM plugin_authors WHERE plugin_id = $1`, [mod.id]);
-      for (let i = 0; i < mod.coAuthors.length; i++) {
-        const co = mod.coAuthors[i];
-        await client.query(
-          `INSERT INTO plugin_authors (plugin_id, author_id, author_name, author_avatar_url, author_profile_url, position)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           ON CONFLICT (plugin_id, author_id) DO UPDATE SET
-             author_name = EXCLUDED.author_name,
-             author_avatar_url = EXCLUDED.author_avatar_url,
-             author_profile_url = EXCLUDED.author_profile_url,
-             position = EXCLUDED.position`,
-          [mod.id, co.authorId, co.name, co.avatarUrl, co.profileUrl, i],
-        );
-      }
+    // Deduped by id (last occurrence wins, same convention as the
+    // plugin_authors dedup below) -- a single INSERT...ON CONFLICT DO
+    // UPDATE can't affect the same row twice within one statement, unlike
+    // the old per-row loop this replaced, which just silently re-upserted
+    // a duplicate as two independent statements. Guards against a rare
+    // upstream data hiccup (pagination overlap, a retried page) throwing
+    // out the whole batch instead of just double-counting one row the
+    // way it always harmlessly did before.
+    const dedupedMods = [...new Map(mods.map((m) => [m.id, m])).values()];
+
+    const pluginsJson = JSON.stringify(
+      dedupedMods.map((m) => ({
+        id: m.id,
+        game: m.game,
+        name_id: m.nameId,
+        name: m.name,
+        author_id: m.authorId,
+        author_name: m.authorName,
+        author_profile_url: m.authorProfileUrl,
+        author_avatar_url: m.authorAvatarUrl,
+        profile_url: m.profileUrl,
+        tags: m.tags,
+        logo_url: m.logoUrl,
+        summary: m.summary,
+        ratings_total: m.ratingsTotal,
+        ratings_positive: m.ratingsPositive,
+        ratings_negative: m.ratingsNegative,
+        ratings_percentage_positive: m.ratingsPercentagePositive,
+        ratings_display_text: m.ratingsDisplayText,
+        date_added: m.dateAdded,
+        date_updated: m.dateUpdated,
+      })),
+    );
+    await client.query(
+      `INSERT INTO plugins (id, game, name_id, name, author_id, author_name, author_profile_url, author_avatar_url, profile_url, tags, logo_url, summary, ratings_total, ratings_positive, ratings_negative, ratings_percentage_positive, ratings_display_text, date_added, date_updated)
+       SELECT id, game, name_id, name, author_id, author_name, author_profile_url, author_avatar_url, profile_url, tags, logo_url, summary, ratings_total, ratings_positive, ratings_negative, ratings_percentage_positive, ratings_display_text, to_timestamp(date_added), to_timestamp(date_updated)
+       FROM json_to_recordset($1::json) AS x(
+         id int, game text, name_id text, name text, author_id int, author_name text, author_profile_url text, author_avatar_url text,
+         profile_url text, tags text[], logo_url text, summary text, ratings_total int, ratings_positive int, ratings_negative int,
+         ratings_percentage_positive int, ratings_display_text text, date_added double precision, date_updated double precision
+       )
+       ON CONFLICT (id) DO UPDATE SET
+         name_id = EXCLUDED.name_id,
+         name = EXCLUDED.name,
+         author_id = EXCLUDED.author_id,
+         author_name = EXCLUDED.author_name,
+         author_profile_url = EXCLUDED.author_profile_url,
+         author_avatar_url = EXCLUDED.author_avatar_url,
+         profile_url = EXCLUDED.profile_url,
+         tags = EXCLUDED.tags,
+         logo_url = EXCLUDED.logo_url,
+         summary = EXCLUDED.summary,
+         ratings_total = EXCLUDED.ratings_total,
+         ratings_positive = EXCLUDED.ratings_positive,
+         ratings_negative = EXCLUDED.ratings_negative,
+         ratings_percentage_positive = EXCLUDED.ratings_percentage_positive,
+         ratings_display_text = EXCLUDED.ratings_display_text,
+         date_updated = EXCLUDED.date_updated`,
+      [pluginsJson],
+    );
+
+    await client.query(
+      `INSERT INTO plugin_snapshots (plugin_id, captured_at, downloads_total, downloads_today, subscribers_total, popularity_rank_position, game, date_updated)
+       SELECT plugin_id, captured_at, downloads_total, downloads_today, subscribers_total, popularity_rank_position, game, to_timestamp(date_updated)
+       FROM unnest($1::int[], $2::timestamptz[], $3::int[], $4::int[], $5::int[], $6::int[], $7::text[], $8::double precision[])
+         AS t(plugin_id, captured_at, downloads_total, downloads_today, subscribers_total, popularity_rank_position, game, date_updated)
+       ON CONFLICT (plugin_id, captured_at) DO NOTHING`,
+      [
+        dedupedMods.map((m) => m.id),
+        dedupedMods.map(() => capturedAt),
+        dedupedMods.map((m) => m.downloadsTotal),
+        dedupedMods.map((m) => m.downloadsToday),
+        dedupedMods.map((m) => m.subscribersTotal),
+        dedupedMods.map((m) => m.popularityRankPosition),
+        dedupedMods.map((m) => m.game),
+        dedupedMods.map((m) => m.dateUpdated),
+      ],
+    );
+
+    // Replace the roster wholesale each run -- cheap at this scale and
+    // avoids tracking additions/removals/reordering between ingests. One
+    // bulk DELETE for every plugin in this batch, then one bulk INSERT for
+    // every (plugin, co-author) row -- deduped by (plugin_id, author_id)
+    // first (keeping the *last* occurrence per pair, same as the old
+    // per-row loop's ON CONFLICT DO UPDATE would've ended up with) since a
+    // single INSERT ON CONFLICT DO UPDATE can't affect the same row twice
+    // in one statement, unlike separate per-row statements.
+    const pluginIds = dedupedMods.map((m) => m.id);
+    await client.query(`DELETE FROM plugin_authors WHERE plugin_id = ANY($1::int[])`, [pluginIds]);
+
+    const authorRowsByKey = new Map<string, { plugin_id: number; author_id: number; author_name: string; author_avatar_url: string | null; author_profile_url: string | null; position: number }>();
+    for (const mod of dedupedMods) {
+      mod.coAuthors.forEach((co, i) => {
+        authorRowsByKey.set(`${mod.id}:${co.authorId}`, {
+          plugin_id: mod.id,
+          author_id: co.authorId,
+          author_name: co.name,
+          author_avatar_url: co.avatarUrl,
+          author_profile_url: co.profileUrl,
+          position: i,
+        });
+      });
     }
+    const authorRows = [...authorRowsByKey.values()];
+    if (authorRows.length > 0) {
+      await client.query(
+        `INSERT INTO plugin_authors (plugin_id, author_id, author_name, author_avatar_url, author_profile_url, position)
+         SELECT plugin_id, author_id, author_name, author_avatar_url, author_profile_url, position
+         FROM json_to_recordset($1::json) AS x(plugin_id int, author_id int, author_name text, author_avatar_url text, author_profile_url text, position int)
+         ON CONFLICT (plugin_id, author_id) DO UPDATE SET
+           author_name = EXCLUDED.author_name,
+           author_avatar_url = EXCLUDED.author_avatar_url,
+           author_profile_url = EXCLUDED.author_profile_url,
+           position = EXCLUDED.position`,
+        [JSON.stringify(authorRows)],
+      );
+    }
+
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -484,28 +607,74 @@ export async function getTopPlugins(period: Period, limit = 50, game = "runescap
   return topPluginsByGain(30, game, limit);
 }
 
+// Aggregates per author directly in SQL (same per-author pattern as
+// getAuthorRanks just below) rather than fetching up to 10,000 full plugin
+// rows via getTopPlugins and grouping them in JS -- that pulled every
+// matching plugin's tags/profile_url/etc across the wire just to keep only
+// author_id and value out of each one. ROW_NUMBER picks out each author's
+// own highest-value plugin to source their display name/avatar from,
+// matching the old JS loop's behavior (it kept the first plugin seen per
+// author, and rows arrived sorted by value descending). Ties on value
+// (common for "hot", where most authors have 0 downloads today) sort by
+// author_id for a deterministic order -- the old JS version's tie order
+// depended on incidental row-scan order and was never a guaranteed
+// contract either.
 export async function getTopAuthors(period: Period, limit = 50, game = "runescape"): Promise<AuthorLeaderboardRow[]> {
-  const plugins = await getTopPlugins(period, 10000, game);
-  const byAuthor = new Map<number, AuthorLeaderboardRow>();
-  for (const plugin of plugins) {
-    const existing = byAuthor.get(plugin.authorId);
-    if (existing) {
-      existing.value += plugin.value;
-      existing.pluginCount += 1;
-    } else {
-      byAuthor.set(plugin.authorId, {
-        authorId: plugin.authorId,
-        authorName: plugin.authorName,
-        nameId: plugin.authorNameId,
-        avatarUrl: plugin.authorAvatarUrl,
-        pluginCount: 1,
-        value: plugin.value,
-      });
-    }
-  }
-  return Array.from(byAuthor.values())
-    .sort((a, b) => b.value - a.value)
-    .slice(0, limit);
+  const pool = getPool();
+
+  const valueSql =
+    period === "hot"
+      ? "l.downloads_today"
+      : period === "alltime"
+        ? "l.downloads_total"
+        : "l.downloads_total - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total)";
+  const cutoffDays = period === "monthly" ? 30 : 7;
+  const needsGainJoins = period === "weekly" || period === "monthly";
+
+  const { rows } = await pool.query(
+    `WITH per_plugin AS (
+       SELECT p.author_id, p.author_name, p.author_avatar_url, ${valueSql} AS value
+       FROM plugins p
+       JOIN LATERAL (
+         SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
+       ) l ON true
+       ${
+         needsGainJoins
+           ? `LEFT JOIN LATERAL (
+                SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at <= now() - ($4 * interval '1 day')
+                ORDER BY s.captured_at DESC LIMIT 1
+              ) b1 ON true
+              LEFT JOIN LATERAL (
+                SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at ASC LIMIT 1
+              ) b2 ON true`
+           : ""
+       }
+       WHERE p.game = $2 AND NOT ($3 = ANY(p.tags))
+     ),
+     ranked AS (
+       SELECT *, ROW_NUMBER() OVER (PARTITION BY author_id ORDER BY value DESC) AS rn FROM per_plugin
+     )
+     SELECT author_id,
+            MAX(author_name) FILTER (WHERE rn = 1) AS author_name,
+            MAX(author_avatar_url) FILTER (WHERE rn = 1) AS author_avatar_url,
+            COUNT(*)::int AS plugin_count,
+            SUM(value) AS value
+     FROM ranked
+     GROUP BY author_id
+     ORDER BY value DESC, author_id ASC
+     LIMIT $1`,
+    needsGainJoins ? [limit, game, LEADERBOARD_EXCLUDED_TAG, cutoffDays] : [limit, game, LEADERBOARD_EXCLUDED_TAG],
+  );
+
+  const authorSlugs = await getAuthorSlugMap(game);
+  return rows.map((row) => ({
+    authorId: row.author_id,
+    authorName: row.author_name,
+    nameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
+    avatarUrl: row.author_avatar_url,
+    pluginCount: row.plugin_count,
+    value: Number(row.value),
+  }));
 }
 
 // Rank of specific authors within a period's leaderboard, without fetching
@@ -603,15 +772,26 @@ export async function searchPluginsAndAuthors(
   // below), but the highest-ranked (most downloaded) match always sorts
   // first within those -- a popular plugin found via its author's name
   // should outrank an obscure exact-name match.
+  // Both queries below look up each plugin's latest snapshot via a
+  // per-plugin LATERAL (scales with how many plugins actually match the
+  // name/author filter -- a handful to a couple thousand) rather than a
+  // `DISTINCT ON (plugin_id) ... FROM plugin_snapshots` CTE with no WHERE
+  // of its own. The CTE form reads as cleaner SQL, but with no filter to
+  // push down it forces Postgres into a full index scan + dedup across
+  // *every* snapshot ever recorded (1M+ rows and growing) any time the
+  // plugins/authors side of the join isn't selective enough for the
+  // planner to invert it into a nested loop on its own -- a broad query
+  // (a single common letter) reliably hits that worst case. Measured
+  // 332ms/340ms -> ~21ms/27ms against the real dataset switching to
+  // LATERAL. See plugin_snapshots_plugin_captured_idx, which every other
+  // "latest snapshot for this one plugin" lookup in this file already
+  // uses the same way.
   const pluginsResult = await pool.query(
-    `WITH latest AS (
-       SELECT DISTINCT ON (s.plugin_id) s.plugin_id, s.downloads_total
-       FROM plugin_snapshots s
-       ORDER BY s.plugin_id, s.captured_at DESC
-     )
-     SELECT p.id, p.name_id, p.name, p.author_name, p.author_avatar_url, l.downloads_total AS total
+    `SELECT p.id, p.name_id, p.name, p.author_name, p.author_avatar_url, l.downloads_total AS total
      FROM plugins p
-     JOIN latest l ON l.plugin_id = p.id
+     JOIN LATERAL (
+       SELECT downloads_total FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
+     ) l ON true
      WHERE p.game = $2
        AND NOT ($3 = ANY(p.tags))
        AND (
@@ -626,17 +806,14 @@ export async function searchPluginsAndAuthors(
   );
 
   const authorsResult = await pool.query(
-    `WITH latest AS (
-       SELECT DISTINCT ON (s.plugin_id) s.plugin_id, s.downloads_total
-       FROM plugin_snapshots s
-       ORDER BY s.plugin_id, s.captured_at DESC
-     ),
-     agg AS (
+    `WITH agg AS (
        SELECT pa.author_id, MAX(pa.author_name) AS author_name, MAX(pa.author_avatar_url) AS author_avatar_url,
               COUNT(DISTINCT pa.plugin_id) AS plugin_count, SUM(l.downloads_total) AS total
        FROM plugin_authors pa
        JOIN plugins p ON p.id = pa.plugin_id
-       JOIN latest l ON l.plugin_id = p.id
+       JOIN LATERAL (
+         SELECT downloads_total FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
+       ) l ON true
        WHERE p.game = $2 AND NOT ($3 = ANY(p.tags))
        GROUP BY pa.author_id
      )
@@ -766,7 +943,7 @@ export async function getPluginInfo(pluginId: number): Promise<PluginInfo | null
     `SELECT p.id, p.game, p.name_id, p.name, p.author_id, p.author_name, p.author_avatar_url, p.profile_url, p.tags, p.logo_url, p.summary,
             p.ratings_total, p.ratings_positive, p.ratings_negative, p.ratings_percentage_positive, p.ratings_display_text,
             p.date_added, p.date_updated,
-            l.downloads_total, l.downloads_today, l.subscribers_total, l.popularity_rank_position
+            l.downloads_total, l.downloads_today, l.subscribers_total
      FROM plugins p
      JOIN LATERAL (
        SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
@@ -776,7 +953,18 @@ export async function getPluginInfo(pluginId: number): Promise<PluginInfo | null
   );
   if (rows.length === 0) return null;
   const row = rows[0];
-  const [coAuthors, authorSlugs] = await Promise.all([getPluginCoAuthors(pluginId, row.game), getAuthorSlugMap(row.game)]);
+  // Computed live via getPluginRanks (same RANK() the leaderboards use)
+  // rather than trusting plugin_snapshots.popularity_rank_position --
+  // that column is only ever populated from mod.io's own precomputed
+  // field (see ingest/modio.ts), and RuneLite plugins have no upstream
+  // equivalent, so it's unconditionally null for every RuneLite plugin
+  // (ingest/runelite.ts). Computing it ourselves works the same way for
+  // both games.
+  const [coAuthors, authorSlugs, ranks] = await Promise.all([
+    getPluginCoAuthors(pluginId, row.game),
+    getAuthorSlugMap(row.game),
+    getPluginRanks([pluginId], "alltime", row.game),
+  ]);
   return {
     id: row.id,
     game: row.game,
@@ -801,7 +989,7 @@ export async function getPluginInfo(pluginId: number): Promise<PluginInfo | null
     downloadsTotal: Number(row.downloads_total),
     downloadsToday: Number(row.downloads_today),
     subscribersTotal: Number(row.subscribers_total),
-    popularityRankPosition: row.popularity_rank_position === null ? null : Number(row.popularity_rank_position),
+    popularityRankPosition: ranks.get(pluginId) ?? null,
   };
 }
 
@@ -1067,23 +1255,35 @@ function extractMetricSeries(series: DailySeriesPoint[], metric: CompareMetric, 
 // paginate in JS before it ever gets serialized into a response body.
 async function getAllCategoryStats(game: string): Promise<CategoryStat[]> {
   const pool = getPool();
+  // Each plugin's latest/7d-ago/earliest snapshot is resolved once per
+  // plugin (plugin_stats below), then tags are unnested from that already-
+  // joined result -- unnesting p.tags before the LATERAL joins (the
+  // previous shape) re-ran all three per-plugin snapshot lookups once for
+  // every tag on a plugin instead of once per plugin, i.e. ~6x redundant
+  // work at this catalog's average tag count.
   const { rows } = await pool.query(
-    `SELECT tag,
+    `WITH plugin_stats AS (
+       SELECT p.id, p.tags,
+              l.downloads_total,
+              l.downloads_total - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total) AS week_gain
+       FROM plugins p
+       JOIN LATERAL (
+         SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
+       ) l ON true
+       LEFT JOIN LATERAL (
+         SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at <= now() - interval '7 days'
+         ORDER BY s.captured_at DESC LIMIT 1
+       ) b1 ON true
+       LEFT JOIN LATERAL (
+         SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at ASC LIMIT 1
+       ) b2 ON true
+       WHERE p.game = $1
+     )
+     SELECT tag,
             count(*)::int AS plugin_count,
-            SUM(l.downloads_total)::bigint AS downloads_total,
-            SUM(l.downloads_total - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total))::bigint AS week_gain
-     FROM plugins p, unnest(p.tags) AS tag
-     JOIN LATERAL (
-       SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
-     ) l ON true
-     LEFT JOIN LATERAL (
-       SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at <= now() - interval '7 days'
-       ORDER BY s.captured_at DESC LIMIT 1
-     ) b1 ON true
-     LEFT JOIN LATERAL (
-       SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at ASC LIMIT 1
-     ) b2 ON true
-     WHERE p.game = $1
+            SUM(downloads_total)::bigint AS downloads_total,
+            SUM(week_gain)::bigint AS week_gain
+     FROM plugin_stats, unnest(tags) AS tag
      GROUP BY tag
      ORDER BY downloads_total DESC`,
     [game],
@@ -1219,11 +1419,16 @@ async function getDailyTotalsAllPlugins(fromDate: Date, toDate: Date, game: stri
        WHERE p.game = $2`,
       [fromKey, game],
     ),
+    // Filters on s.game (denormalized onto plugin_snapshots specifically
+    // for this -- see schema.sql) instead of joining to plugins, so this
+    // hits plugin_snapshots_game_captured_idx directly. Joining to plugins
+    // here forces a scan across *every* snapshot in the date range
+    // regardless of game before the join filters it back down -- measured
+    // ~594ms vs ~386ms for a full-year RuneLite range on the real dataset.
     pool.query(
       `SELECT s.plugin_id, s.captured_at::date AS day, s.downloads_total, s.downloads_today
        FROM plugin_snapshots s
-       JOIN plugins p ON p.id = s.plugin_id
-       WHERE p.game = $1 AND s.captured_at >= $2::date AND s.captured_at < $3::date + interval '1 day'
+       WHERE s.game = $1 AND s.captured_at >= $2::date AND s.captured_at < $3::date + interval '1 day'
        ORDER BY s.captured_at ASC`,
       [game, fromKey, toKey],
     ),
@@ -1681,4 +1886,668 @@ export async function getSpecialEvents(game: string, from: string, to: string): 
     end: row.end_date ? row.end_date.toISOString().slice(0, 10) : null,
     url: row.url,
   }));
+}
+
+// "Log in with Discord" sessions (identify + guilds scopes) -- see
+// docs/discord-bot.md and the discord_sessions table comment in schema.sql.
+function generateSessionToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+// One row per login, not one row per Discord user -- a re-login (e.g. a
+// second device) just creates another independent session rather than
+// invalidating the first, so logging in elsewhere doesn't sign you out
+// here. Returns the new session's id, which is what actually goes in the
+// cookie.
+export async function createDiscordSession(session: {
+  discordUserId: string;
+  username: string;
+  avatarHash: string | null;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: Date;
+}): Promise<string> {
+  const pool = getPool();
+  const id = generateSessionToken();
+  await pool.query(
+    `INSERT INTO discord_sessions (id, discord_user_id, username, avatar_hash, access_token, refresh_token, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [id, session.discordUserId, session.username, session.avatarHash, session.accessToken, session.refreshToken, session.expiresAt],
+  );
+  return id;
+}
+
+export async function getDiscordSession(id: string): Promise<DiscordSession | null> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT id, discord_user_id, username, avatar_hash, access_token, refresh_token, expires_at FROM discord_sessions WHERE id = $1`,
+    [id],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    discordUserId: row.discord_user_id,
+    username: row.username,
+    avatarHash: row.avatar_hash,
+    accessToken: row.access_token,
+    refreshToken: row.refresh_token,
+    expiresAt: row.expires_at,
+  };
+}
+
+// Called after a successful Discord token refresh (access tokens expire
+// after ~7 days) so later requests on this same session don't need to
+// refresh again until the new token is itself close to expiry.
+export async function updateDiscordSessionTokens(id: string, accessToken: string, refreshToken: string, expiresAt: Date): Promise<void> {
+  const pool = getPool();
+  await pool.query(`UPDATE discord_sessions SET access_token = $2, refresh_token = $3, expires_at = $4 WHERE id = $1`, [
+    id,
+    accessToken,
+    refreshToken,
+    expiresAt,
+  ]);
+}
+
+export async function deleteDiscordSession(id: string): Promise<void> {
+  const pool = getPool();
+  await pool.query(`DELETE FROM discord_sessions WHERE id = $1`, [id]);
+}
+
+function mapChannelTopicRow(row: {
+  id: number;
+  guild_id: string;
+  channel_id: string;
+  channel_name: string;
+  entity_kind: "plugin" | "author";
+  entity_id: number;
+  entity_name: string;
+  template: string;
+  last_rendered_topic: string | null;
+  last_rendered_at: Date | null;
+  created_at: Date;
+}): DiscordChannelTopic {
+  return {
+    id: row.id,
+    guildId: row.guild_id,
+    channelId: row.channel_id,
+    channelName: row.channel_name,
+    entityKind: row.entity_kind,
+    entityId: row.entity_id,
+    entityName: row.entity_name,
+    template: row.template,
+    lastRenderedTopic: row.last_rendered_topic,
+    lastRenderedAt: row.last_rendered_at,
+    createdAt: row.created_at,
+  };
+}
+
+export async function listChannelTopics(guildId: string): Promise<DiscordChannelTopic[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT * FROM discord_channel_topics WHERE guild_id = $1 ORDER BY created_at`, [guildId]);
+  return rows.map(mapChannelTopicRow);
+}
+
+// One binding per channel -- re-picking a channel that's already bound
+// replaces its entity/template rather than erroring or adding a second
+// row (see schema.sql's UNIQUE(channel_id)). last_rendered_topic/_at reset
+// to NULL on an update so the hourly worker treats an edited binding as
+// due for an immediate push next tick, rather than possibly (if the new
+// render happens to match what's already on the channel) skipping it.
+export async function upsertChannelTopic(input: DiscordChannelTopicInput): Promise<DiscordChannelTopic> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `INSERT INTO discord_channel_topics (guild_id, channel_id, channel_name, entity_kind, entity_id, entity_name, template)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (channel_id) DO UPDATE SET
+       guild_id = EXCLUDED.guild_id,
+       channel_name = EXCLUDED.channel_name,
+       entity_kind = EXCLUDED.entity_kind,
+       entity_id = EXCLUDED.entity_id,
+       entity_name = EXCLUDED.entity_name,
+       template = EXCLUDED.template,
+       last_rendered_topic = NULL,
+       last_rendered_at = NULL
+     RETURNING *`,
+    [input.guildId, input.channelId, input.channelName, input.entityKind, input.entityId, input.entityName, input.template],
+  );
+  return mapChannelTopicRow(rows[0]);
+}
+
+export async function deleteChannelTopic(guildId: string, channelId: string): Promise<void> {
+  const pool = getPool();
+  await pool.query(`DELETE FROM discord_channel_topics WHERE guild_id = $1 AND channel_id = $2`, [guildId, channelId]);
+}
+
+// Every binding across every guild -- for the hourly worker in
+// packages/discord-bot, which has no single guildId to scope by.
+export async function listAllChannelTopics(): Promise<DiscordChannelTopic[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT * FROM discord_channel_topics ORDER BY id`);
+  return rows.map(mapChannelTopicRow);
+}
+
+export async function markChannelTopicRendered(id: number, renderedTopic: string): Promise<void> {
+  const pool = getPool();
+  await pool.query(`UPDATE discord_channel_topics SET last_rendered_topic = $2, last_rendered_at = now() WHERE id = $1`, [id, renderedTopic]);
+}
+
+export const DEFAULT_TOPIC_REFRESH_INTERVAL_HOURS = 5;
+
+export async function getGuildTopicIntervalHours(guildId: string): Promise<number> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT refresh_interval_hours FROM discord_guild_topic_settings WHERE guild_id = $1`, [guildId]);
+  return rows[0]?.refresh_interval_hours ?? DEFAULT_TOPIC_REFRESH_INTERVAL_HOURS;
+}
+
+export async function setGuildTopicIntervalHours(guildId: string, hours: number): Promise<void> {
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO discord_guild_topic_settings (guild_id, refresh_interval_hours, updated_at)
+     VALUES ($1, $2, now())
+     ON CONFLICT (guild_id) DO UPDATE SET refresh_interval_hours = EXCLUDED.refresh_interval_hours, updated_at = EXCLUDED.updated_at`,
+    [guildId, hours],
+  );
+}
+
+// For the hourly worker -- one query for every guild's configured interval
+// rather than one lookup per binding.
+export async function getAllGuildTopicIntervalHours(): Promise<Map<string, number>> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT guild_id, refresh_interval_hours FROM discord_guild_topic_settings`);
+  return new Map(rows.map((r) => [r.guild_id as string, r.refresh_interval_hours as number]));
+}
+
+function mapGuildAdminRow(row: { id: number; guild_id: string; discord_user_id: string; added_by: string; created_at: Date }): DiscordGuildAdmin {
+  return { id: row.id, guildId: row.guild_id, discordUserId: row.discord_user_id, addedBy: row.added_by, createdAt: row.created_at };
+}
+
+export async function listGuildAdmins(guildId: string): Promise<DiscordGuildAdmin[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT * FROM discord_guild_admins WHERE guild_id = $1 ORDER BY created_at`, [guildId]);
+  return rows.map(mapGuildAdminRow);
+}
+
+// Doesn't cover the guild's own Discord owner -- that's checked from the
+// owner flag Discord's own guild list already carries (see discordAuth.ts),
+// not a row in this table. This is only ever "is this user an *explicitly
+// promoted* admin".
+export async function isGuildAdminRow(guildId: string, discordUserId: string): Promise<boolean> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT 1 FROM discord_guild_admins WHERE guild_id = $1 AND discord_user_id = $2`, [guildId, discordUserId]);
+  return rows.length > 0;
+}
+
+export async function addGuildAdmin(guildId: string, discordUserId: string, addedBy: string): Promise<DiscordGuildAdmin> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `INSERT INTO discord_guild_admins (guild_id, discord_user_id, added_by)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (guild_id, discord_user_id) DO UPDATE SET added_by = EXCLUDED.added_by
+     RETURNING *`,
+    [guildId, discordUserId, addedBy],
+  );
+  return mapGuildAdminRow(rows[0]);
+}
+
+export async function removeGuildAdmin(guildId: string, discordUserId: string): Promise<void> {
+  const pool = getPool();
+  await pool.query(`DELETE FROM discord_guild_admins WHERE guild_id = $1 AND discord_user_id = $2`, [guildId, discordUserId]);
+}
+
+export async function getGuildSubscription(guildId: string): Promise<DiscordGuildSubscription | null> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT * FROM discord_guild_subscriptions WHERE guild_id = $1`, [guildId]);
+  if (!rows[0]) return null;
+  return { guildId: rows[0].guild_id, grantedBy: rows[0].granted_by, createdAt: rows[0].created_at };
+}
+
+export async function grantGuildSubscription(guildId: string, grantedBy: string): Promise<void> {
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO discord_guild_subscriptions (guild_id, granted_by) VALUES ($1, $2)
+     ON CONFLICT (guild_id) DO UPDATE SET granted_by = EXCLUDED.granted_by, created_at = now()`,
+    [guildId, grantedBy],
+  );
+}
+
+export async function revokeGuildSubscription(guildId: string): Promise<void> {
+  const pool = getPool();
+  await pool.query(`DELETE FROM discord_guild_subscriptions WHERE guild_id = $1`, [guildId]);
+}
+
+// For the site-wide admin panel's "see data about the discords" view --
+// every subscribed guild at once, rather than one getGuildSubscription
+// lookup per guild in the bot's guild list.
+export async function getAllGuildSubscriptions(): Promise<DiscordGuildSubscription[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT * FROM discord_guild_subscriptions`);
+  return rows.map((r) => ({ guildId: r.guild_id, grantedBy: r.granted_by, createdAt: r.created_at }));
+}
+
+// Same panel's binding-count column -- one grouped query instead of a
+// listChannelTopics call per guild.
+export async function countChannelTopicsByGuild(): Promise<Map<string, number>> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT guild_id, COUNT(*)::int AS count FROM discord_channel_topics GROUP BY guild_id`);
+  return new Map(rows.map((r) => [r.guild_id as string, r.count as number]));
+}
+
+function mapSiteAdminRow(row: { id: number; discord_user_id: string; added_by: string; created_at: Date }): SiteAdmin {
+  return { id: row.id, discordUserId: row.discord_user_id, addedBy: row.added_by, createdAt: row.created_at };
+}
+
+export async function listSiteAdmins(): Promise<SiteAdmin[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT * FROM site_admins ORDER BY created_at`);
+  return rows.map(mapSiteAdminRow);
+}
+
+// Doesn't cover the SITE_OWNER_DISCORD_IDS bootstrap env var -- that's
+// checked in packages/api's discordAuth.ts, not here. This is only ever
+// "is this user an *explicitly promoted* site-wide mod".
+export async function isSiteAdminRow(discordUserId: string): Promise<boolean> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT 1 FROM site_admins WHERE discord_user_id = $1`, [discordUserId]);
+  return rows.length > 0;
+}
+
+export async function addSiteAdmin(discordUserId: string, addedBy: string): Promise<SiteAdmin> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `INSERT INTO site_admins (discord_user_id, added_by)
+     VALUES ($1, $2)
+     ON CONFLICT (discord_user_id) DO UPDATE SET added_by = EXCLUDED.added_by
+     RETURNING *`,
+    [discordUserId, addedBy],
+  );
+  return mapSiteAdminRow(rows[0]);
+}
+
+export async function removeSiteAdmin(discordUserId: string): Promise<void> {
+  const pool = getPool();
+  await pool.query(`DELETE FROM site_admins WHERE discord_user_id = $1`, [discordUserId]);
+}
+
+// ---------- Announcements ----------
+
+function mapAnnouncementWatchRow(row: {
+  id: number;
+  guild_id: string;
+  channel_id: string;
+  channel_name: string;
+  kind: DiscordAnnouncementKind;
+  games: string[];
+  ping_here: boolean;
+  ping_everyone: boolean;
+  ping_role_ids: string[];
+  ping_role_names: string[];
+  show_thumbnail: boolean;
+  last_announced_at: Date;
+  created_at: Date;
+}): DiscordAnnouncementWatch {
+  return {
+    id: row.id,
+    guildId: row.guild_id,
+    channelId: row.channel_id,
+    channelName: row.channel_name,
+    kind: row.kind,
+    games: row.games,
+    pingHere: row.ping_here,
+    pingEveryone: row.ping_everyone,
+    pingRoleIds: row.ping_role_ids,
+    pingRoleNames: row.ping_role_names,
+    showThumbnail: row.show_thumbnail,
+    lastAnnouncedAt: row.last_announced_at,
+    createdAt: row.created_at,
+  };
+}
+
+export async function listAnnouncementWatches(guildId: string): Promise<DiscordAnnouncementWatch[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT * FROM discord_announcement_watches WHERE guild_id = $1 ORDER BY created_at`, [guildId]);
+  return rows.map(mapAnnouncementWatchRow);
+}
+
+// For the discord-bot posting tick -- every guild's watches at once,
+// same reasoning as listAllChannelTopics.
+export async function listAllAnnouncementWatches(): Promise<DiscordAnnouncementWatch[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT * FROM discord_announcement_watches ORDER BY id`);
+  return rows.map(mapAnnouncementWatchRow);
+}
+
+export async function createAnnouncementWatch(input: DiscordAnnouncementWatchInput): Promise<DiscordAnnouncementWatch> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `INSERT INTO discord_announcement_watches (guild_id, channel_id, channel_name, kind, games, ping_here, ping_everyone, ping_role_ids, ping_role_names, show_thumbnail)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     RETURNING *`,
+    [
+      input.guildId,
+      input.channelId,
+      input.channelName,
+      input.kind,
+      input.games,
+      input.pingHere,
+      input.pingEveryone,
+      input.pingRoleIds,
+      input.pingRoleNames,
+      input.showThumbnail,
+    ],
+  );
+  return mapAnnouncementWatchRow(rows[0]);
+}
+
+export async function updateAnnouncementWatch(guildId: string, id: number, input: DiscordAnnouncementWatchInput): Promise<DiscordAnnouncementWatch | null> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `UPDATE discord_announcement_watches
+     SET channel_id = $3, channel_name = $4, kind = $5, games = $6, ping_here = $7, ping_everyone = $8, ping_role_ids = $9, ping_role_names = $10, show_thumbnail = $11
+     WHERE guild_id = $1 AND id = $2
+     RETURNING *`,
+    [
+      guildId,
+      id,
+      input.channelId,
+      input.channelName,
+      input.kind,
+      input.games,
+      input.pingHere,
+      input.pingEveryone,
+      input.pingRoleIds,
+      input.pingRoleNames,
+      input.showThumbnail,
+    ],
+  );
+  return rows[0] ? mapAnnouncementWatchRow(rows[0]) : null;
+}
+
+export async function deleteAnnouncementWatch(guildId: string, id: number): Promise<void> {
+  const pool = getPool();
+  await pool.query(`DELETE FROM discord_announcement_watches WHERE guild_id = $1 AND id = $2`, [guildId, id]);
+}
+
+export async function markAnnouncementWatchAnnounced(id: number, at: Date): Promise<void> {
+  const pool = getPool();
+  await pool.query(`UPDATE discord_announcement_watches SET last_announced_at = $2 WHERE id = $1`, [id, at]);
+}
+
+function mapEntityAnnouncementRow(row: {
+  id: number;
+  guild_id: string;
+  channel_id: string;
+  channel_name: string;
+  entity_kind: DiscordEntityKind;
+  entity_id: number;
+  entity_name: string;
+  kind: DiscordEntityAnnouncementKind;
+  ping_here: boolean;
+  ping_everyone: boolean;
+  ping_role_ids: string[];
+  ping_role_names: string[];
+  show_thumbnail: boolean;
+  last_announced_at: Date;
+  created_at: Date;
+}): DiscordEntityAnnouncement {
+  return {
+    id: row.id,
+    guildId: row.guild_id,
+    channelId: row.channel_id,
+    channelName: row.channel_name,
+    entityKind: row.entity_kind,
+    entityId: row.entity_id,
+    entityName: row.entity_name,
+    kind: row.kind,
+    pingHere: row.ping_here,
+    pingEveryone: row.ping_everyone,
+    pingRoleIds: row.ping_role_ids,
+    pingRoleNames: row.ping_role_names,
+    showThumbnail: row.show_thumbnail,
+    lastAnnouncedAt: row.last_announced_at,
+    createdAt: row.created_at,
+  };
+}
+
+export async function listEntityAnnouncements(guildId: string): Promise<DiscordEntityAnnouncement[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT * FROM discord_entity_announcements WHERE guild_id = $1 ORDER BY created_at`, [guildId]);
+  return rows.map(mapEntityAnnouncementRow);
+}
+
+// For the discord-bot posting tick -- every guild's per-plugin/author
+// bindings at once, same reasoning as listAllAnnouncementWatches.
+export async function listAllEntityAnnouncements(): Promise<DiscordEntityAnnouncement[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT * FROM discord_entity_announcements ORDER BY id`);
+  return rows.map(mapEntityAnnouncementRow);
+}
+
+// ON CONFLICT on (guild_id, channel_id, entity_kind, entity_id) --
+// re-picking the same entity+channel pairing updates its settings in
+// place rather than erroring or duplicating, same as
+// discord_channel_topics' own upsert.
+export async function upsertEntityAnnouncement(input: DiscordEntityAnnouncementInput): Promise<DiscordEntityAnnouncement> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `INSERT INTO discord_entity_announcements (guild_id, channel_id, channel_name, entity_kind, entity_id, entity_name, kind, ping_here, ping_everyone, ping_role_ids, ping_role_names, show_thumbnail)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+     ON CONFLICT (guild_id, channel_id, entity_kind, entity_id) DO UPDATE SET
+       entity_name = EXCLUDED.entity_name,
+       kind = EXCLUDED.kind,
+       ping_here = EXCLUDED.ping_here,
+       ping_everyone = EXCLUDED.ping_everyone,
+       ping_role_ids = EXCLUDED.ping_role_ids,
+       ping_role_names = EXCLUDED.ping_role_names,
+       show_thumbnail = EXCLUDED.show_thumbnail
+     RETURNING *`,
+    [
+      input.guildId,
+      input.channelId,
+      input.channelName,
+      input.entityKind,
+      input.entityId,
+      input.entityName,
+      input.kind,
+      input.pingHere,
+      input.pingEveryone,
+      input.pingRoleIds,
+      input.pingRoleNames,
+      input.showThumbnail,
+    ],
+  );
+  return mapEntityAnnouncementRow(rows[0]);
+}
+
+export async function removeEntityAnnouncement(guildId: string, id: number): Promise<void> {
+  const pool = getPool();
+  await pool.query(`DELETE FROM discord_entity_announcements WHERE guild_id = $1 AND id = $2`, [guildId, id]);
+}
+
+export async function markEntityAnnouncementAnnounced(id: number, at: Date): Promise<void> {
+  const pool = getPool();
+  await pool.query(`UPDATE discord_entity_announcements SET last_announced_at = $2 WHERE id = $1`, [id, at]);
+}
+
+// A little more polished than the bare minimum out of the box -- author
+// attribution in the description, a game tag in the footer -- so a
+// free-tier guild's announcements (which always use these, see
+// discord_guild_announcement_embed's "no row = defaults" comment) still
+// look considered, not just a placeholder someone's expected to replace.
+const DEFAULT_ANNOUNCEMENT_EMBED: Omit<DiscordGuildAnnouncementEmbed, "guildId" | "updatedAt"> = {
+  color: "#caa44d",
+  titleTemplate: "{verb}: {name}",
+  descriptionTemplate: "{name} {verb_lower} on {site}, by {author}.",
+  footerTemplate: "{game} plugin",
+  showThumbnail: true,
+};
+
+// No row = the defaults above (not yet customized) -- same "no row means
+// default" convention as discord_guild_topic_settings.
+export async function getGuildAnnouncementEmbed(guildId: string): Promise<DiscordGuildAnnouncementEmbed> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT * FROM discord_guild_announcement_embed WHERE guild_id = $1`, [guildId]);
+  if (!rows[0]) return { guildId, ...DEFAULT_ANNOUNCEMENT_EMBED, updatedAt: new Date(0) };
+  const r = rows[0];
+  return {
+    guildId: r.guild_id,
+    color: r.color,
+    titleTemplate: r.title_template,
+    descriptionTemplate: r.description_template,
+    footerTemplate: r.footer_template,
+    showThumbnail: r.show_thumbnail,
+    updatedAt: r.updated_at,
+  };
+}
+
+export async function setGuildAnnouncementEmbed(
+  guildId: string,
+  patch: Omit<DiscordGuildAnnouncementEmbed, "guildId" | "updatedAt">,
+): Promise<DiscordGuildAnnouncementEmbed> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `INSERT INTO discord_guild_announcement_embed (guild_id, color, title_template, description_template, footer_template, show_thumbnail, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, now())
+     ON CONFLICT (guild_id) DO UPDATE SET
+       color = EXCLUDED.color,
+       title_template = EXCLUDED.title_template,
+       description_template = EXCLUDED.description_template,
+       footer_template = EXCLUDED.footer_template,
+       show_thumbnail = EXCLUDED.show_thumbnail,
+       updated_at = EXCLUDED.updated_at
+     RETURNING *`,
+    [guildId, patch.color, patch.titleTemplate, patch.descriptionTemplate, patch.footerTemplate, patch.showThumbnail],
+  );
+  const r = rows[0];
+  return {
+    guildId: r.guild_id,
+    color: r.color,
+    titleTemplate: r.title_template,
+    descriptionTemplate: r.description_template,
+    footerTemplate: r.footer_template,
+    showThumbnail: r.show_thumbnail,
+    updatedAt: r.updated_at,
+  };
+}
+
+// Optional extra scope for the two candidate queries below -- either one
+// specific plugin (a Per-plugin/author binding with entityKind 'plugin')
+// or every plugin belonging to one specific author (entityKind 'author',
+// "announce whenever this author publishes/updates *any* plugin"). Global
+// watches pass neither (no filter -- catalog-wide, just game-scoped).
+export interface AnnouncementCandidateFilter {
+  pluginId?: number;
+  authorId?: number;
+}
+
+// New plugins since `since` -- for 'release'-kind watches/bindings.
+// plugins.date_added is upstream's own "first published" timestamp (see
+// listPluginIdsForGame's comment), close enough to "when we discovered
+// it" in practice since ingest runs hourly; what actually prevents a
+// backlog flood when a watch is first turned on is its own
+// last_announced_at cursor (defaulted to creation time), not this query.
+export async function getNewPluginCandidates(since: Date, games: string[], filter?: AnnouncementCandidateFilter): Promise<AnnouncementCandidate[]> {
+  const pool = getPool();
+  const params: unknown[] = [since, games];
+  let extraCondition = "";
+  if (filter?.pluginId !== undefined) {
+    params.push(filter.pluginId);
+    extraCondition = `AND id = $${params.length}`;
+  } else if (filter?.authorId !== undefined) {
+    params.push(filter.authorId);
+    extraCondition = `AND author_id = $${params.length}`;
+  }
+  const { rows } = await pool.query(
+    `SELECT id, name_id, name, game, author_name, author_avatar_url, profile_url, logo_url, date_added
+     FROM plugins
+     WHERE date_added > $1 AND game = ANY($2) ${extraCondition}
+     ORDER BY date_added ASC`,
+    params,
+  );
+  return rows.map((r) => ({
+    kind: "release" as const,
+    pluginId: r.id,
+    pluginName: r.name,
+    pluginNameId: r.name_id,
+    game: r.game,
+    authorName: r.author_name,
+    authorAvatarUrl: r.author_avatar_url,
+    profileUrl: r.profile_url,
+    logoUrl: r.logo_url,
+    occurredAt: r.date_added,
+    version: null,
+    changelog: null,
+    releaseUrl: null,
+  }));
+}
+
+// Genuine version updates since `since` -- for 'update'-kind
+// watches/bindings. Excludes the synthesized "first-seen" row
+// (firstSeenRelease.ts), anything within a day of the plugin's own
+// date_added (that's the plugin's debut release landing in
+// plugin_releases, already covered by getNewPluginCandidates above, not
+// a second thing to announce), and 'unavailable' rows (a plugin-hub
+// listing getting pulled, not a real version -- see schema.sql's
+// plugin_releases comment).
+export async function getPluginUpdateCandidates(since: Date, games: string[], filter?: AnnouncementCandidateFilter): Promise<AnnouncementCandidate[]> {
+  const pool = getPool();
+  const params: unknown[] = [since, games];
+  let extraCondition = "";
+  if (filter?.pluginId !== undefined) {
+    params.push(filter.pluginId);
+    extraCondition = `AND p.id = $${params.length}`;
+  } else if (filter?.authorId !== undefined) {
+    params.push(filter.authorId);
+    extraCondition = `AND p.author_id = $${params.length}`;
+  }
+  const { rows } = await pool.query(
+    `SELECT p.id, p.name_id, p.name, p.game, p.author_name, p.author_avatar_url, p.profile_url, p.logo_url,
+            pr.released_at, pr.version, pr.changelog, pr.url
+     FROM plugin_releases pr
+     JOIN plugins p ON p.id = pr.plugin_id
+     WHERE pr.released_at > $1
+       AND p.game = ANY($2)
+       AND pr.kind = 'update'
+       AND pr.source_key != 'first-seen'
+       AND pr.released_at > p.date_added + INTERVAL '1 day'
+       ${extraCondition}
+     ORDER BY pr.released_at ASC`,
+    params,
+  );
+  return rows.map((r) => ({
+    kind: "update" as const,
+    pluginId: r.id,
+    pluginName: r.name,
+    pluginNameId: r.name_id,
+    game: r.game,
+    authorName: r.author_name,
+    authorAvatarUrl: r.author_avatar_url,
+    profileUrl: r.profile_url,
+    logoUrl: r.logo_url,
+    occurredAt: r.released_at,
+    version: r.version,
+    changelog: r.changelog,
+    releaseUrl: r.url,
+  }));
+}
+
+// For the hourly targeted release-detail check (packages/ingest's
+// run-release-ingest-hourly.ts) -- plugins whose date_updated has moved
+// past the latest release row already recorded for them (or that have no
+// release rows at all yet) are the ones worth spending an expensive
+// per-plugin release-detail fetch on, instead of re-scanning the entire
+// catalog every hour the way the weekly full reconciliation
+// (run-release-ingest.ts) does. Derived entirely from existing columns --
+// no new tracking state needed.
+export async function listPluginsNeedingReleaseCheck(game: string): Promise<{ id: number; nameId: string; dateAdded: string }[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT p.id, p.name_id, p.date_added
+     FROM plugins p
+     LEFT JOIN (SELECT plugin_id, MAX(released_at) AS latest FROM plugin_releases GROUP BY plugin_id) r ON r.plugin_id = p.id
+     WHERE p.game = $1 AND p.date_updated > COALESCE(r.latest, p.date_added - INTERVAL '1 day')
+     ORDER BY p.id`,
+    [game],
+  );
+  return rows.map((r) => ({ id: r.id, nameId: r.name_id, dateAdded: r.date_added.toISOString() }));
 }

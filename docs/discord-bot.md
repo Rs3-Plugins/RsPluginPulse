@@ -1,8 +1,80 @@
 # RuneScape PluginPulse — Discord Bot
 
-Planning doc only. Nothing here is built yet — this is the brief for designing
-and implementing the bot, written up so a fresh session has full context
-without re-deriving it from scratch.
+Planning doc for the interactive bot (slash commands, notifications, etc.) --
+none of that is built yet. This is the brief for designing and implementing
+it, written up so a fresh session has full context without re-deriving it
+from scratch.
+
+**What already exists, ahead of this doc's phasing:** the dashboard's OAuth
+login + session (`packages/api/src/lib/discordAuth.ts`,
+`packages/api/src/app/api/discord/`), per-guild nickname/avatar editing (the
+`/discord` dashboard's General tab, pushed straight to Discord's guild
+member API, no DB mirror), **Channel description templates** (the Channel
+topics tab -- bindings saved via `discord_channel_topics`, see schema.sql;
+rendered and pushed by `packages/discord-bot/src/channelTopics.ts` on the
+same hourly interval as the presence refresh below, using discord.js's own
+`channel.setTopic()` rather than a raw fetch), and `packages/discord-bot`
+itself -- a persistent Gateway connection that keeps the bot Online with a
+global "Watching Plugins: N RuneScape, M RuneLite" status (refreshed once
+a day), **plus a first slice of read-only slash commands**: `/plugin`,
+`/author`, `/rank`, `/leaderboard`, `/status`, and `/help`
+(`packages/discord-bot/src/commands/`, registered globally via
+`client.application.commands.set()` on every ready event, with
+autocomplete on every name-taking option backed by the existing
+`searchPluginsAndAuthors`), **plus account linking**: `/link`, `/unlink`,
+and `/mystats` (trust-based, see **Account linking** below), backed by
+a new `discord_author_links` table and surfaced read-only in the
+dashboard's Linked authors tab. The lookup commands query `packages/db`
+directly with no new tables; account linking is the one new table of the
+two. `/watch` and per-server command toggles below are still unbuilt. Bot-install
+now requests a permission set (permissions=257044, see
+`buildBotInstallUrl` in `packages/api/src/lib/discordAuth.ts` for the
+full breakdown) covering both what's built today and this doc's planned
+features, instead of 0 -- servers that installed the bot before this was
+added need a re-invite (or the bot role granted the specific missing
+permission manually) before Channel topics (or nickname/avatar editing)
+will actually work there. The dashboard detects a Discord call failing
+specifically because of this (`isMissingPermissionsError` in the same
+file) and prompts a one-click re-invite rather than a generic error.
+
+**Notifications** (this doc's section below) are also now built, as the
+Announcements tab -- three pieces: a **Global** tab (a flexible list of
+"post `release`/`update` events for these game(s) to this channel, with
+this ping/thumbnail" watch rows -- `discord_announcement_watches`), a
+**Per-plugin** tab (same idea for one specific plugin, additive to any
+Global rule that also matches it -- `discord_plugin_announcements`,
+mirrors Channel topics' own per-entity binding pattern), and a
+subscriber-gated **Embed builder** tab (`discord_guild_announcement_embed`,
+one config per guild) for customizing the posted embed's colour/title/
+description/footer/thumbnail. `packages/discord-bot/src/announcements.ts`
+runs on the same hourly tick as presence/channel-topics, finding
+candidates since each row's own `last_announced_at` cursor (defaults to
+the row's creation time, so turning a watch on never floods the channel
+with history) via `getNewPluginCandidates`/`getPluginUpdateCandidates` in
+`packages/db/src/queries.ts`, and advancing that cursor after *every*
+successful post (not batched at the end) so a crash/restart mid-tick
+can't cause duplicate posts.
+
+This relies on a new ingest piece: `packages/ingest/src/
+run-release-ingest-hourly.ts` (wired into the same hourly systemd timer
+as the regular snapshot ingest, see `deploy/configure.sh`) finds plugins
+whose `date_updated` has moved past the latest `plugin_releases` row
+already recorded for them (`listPluginsNeedingReleaseCheck`) and only
+fetches release details for *those* -- normally a handful per hour, not
+the full 2,600+ RuneLite catalog, which is what makes hourly detection
+safe against GitHub's API rate limit (the existing weekly full-catalog
+job, `run-release-ingest.ts` via `.github/workflows/
+weekly-release-ingest.yml`, stays as a reconciliation safety net and is
+unchanged). RuneLite release details still need `PLUGIN_HUB_TOKEN` set by
+hand in the server's `shared/.env` (see that file's own comment) for the
+hourly job to actually do anything on the RuneLite side -- without it,
+the hourly job logs a warning and skips, falling back to the weekly scan
+eventually catching it instead.
+
+This -- plus the read-only slash commands and account linking above -- is a
+small, deliberately narrow slice of **Suggested architecture**'s
+`packages/discord-bot` below. Stat-swing notification watches (`/watch`)
+and per-server command toggles described in this doc are still unbuilt.
 
 ## Pitch
 
@@ -17,6 +89,21 @@ command flags for every setting.
 
 ### Slash commands
 
+**`/plugin`, `/author`, `/rank`, `/leaderboard`, `/status`, `/help` are
+built** (`packages/discord-bot/src/commands/`), querying `packages/db`
+directly rather than going through `/api/*` (same pattern
+`announcements.ts`/`channelTopics.ts` already use, since the bot process
+is just another consumer of the same package). **`/mystats`, `/link`,
+`/unlink` are also built** -- see **Account linking** below. `/plugin`
+and the author embed shared by `/author`, `/mystats`, and `/link`'s
+confirmation (`buildAuthorEmbed` in `packages/discord-bot/src/embeds.ts`)
+each set their own entity's visual stats card as the embed's image,
+reusing the existing `/api/card/{type}/{id}.png` renderer
+(`cardImageUrl` in `format.ts`) rather than building a from-scratch image
+generator. Still open from the bullets below: a sparkline specifically
+(the reused card renders its own, but there's no bot-side control over
+which range it shows), and the admin-only `/watch`/`/commands` bullets.
+
 - `/plugin <name>` — looks up a plugin by name/slug (reuse `/api/search` for
   autocomplete), replies with an embed built the same way `/api/card`
   renders its PNG: name, author, installs/downloads, subscribers, rank,
@@ -27,7 +114,7 @@ command flags for every setting.
   terser than the full card.
 - `/leaderboard <plugins|authors> [period]` — top N for a period (alltime /
   hot / weekly / monthly), mirrors the site's leaderboard tabs.
-- `/myplugins [game]` — pulls up the stats for whichever author account the
+- `/mystats [game]` — pulls up the stats for whichever author account the
   Discord user has linked for that game (see **Account linking** below) as
   an embed, so an author can check their own numbers without leaving
   Discord. Omitting `game` with only one game linked just uses that one; if
@@ -102,9 +189,27 @@ command flags for every setting.
 
 ### Per-server command toggles
 
+**Built, dashboard half only** -- a new `discord_command_toggles` table
+(schema.sql: one row per disabled command per guild, "missing = on" --
+see its own comment), a guild-scoped API
+(`guilds/[guildId]/commands`, `packages/api/src/app/api/discord/`,
+`TOGGLEABLE_COMMANDS` in `packages/api/src/lib/discordCommands.ts`), and
+the dashboard's Commands tab (`CommandsTab.tsx`) wired to it with
+optimistic toggle switches. The bot's own `interactionCreate` handler
+(`packages/discord-bot/src/index.ts`) checks the toggle before running a
+command and replies with exactly the ephemeral message below if it's
+off -- this is the "reject at the interaction level" approach called out
+below, not a Discord-side permissions hide. `/help` is hardcoded
+non-toggleable on both sides (`ALWAYS_ENABLED_COMMAND` in the bot,
+excluded from `TOGGLEABLE_COMMANDS` in the API) so a server that's
+turned everything else off still has a way to see that. **Not built:**
+the `/commands enable|disable` admin slash command described below --
+only the dashboard checklist exists so far, not the second ("two places
+to control it") path.
+
 - Admins can turn individual slash commands off for their server (e.g. a
   server that only wants the read-only lookup commands and doesn't want
-  `/myplugins` or notifications cluttering things up).
+  `/mystats` or notifications cluttering things up).
 - Two places to control it, same underlying per-guild setting: the
   `/commands enable|disable` admin command, and a checklist in the
   dashboard's per-server settings page.
@@ -132,7 +237,17 @@ command flags for every setting.
    checklist, and an overview of which Discord users have linked an author
    account (per game) in this server (admin visibility, not edit).
 
-### Account linking (for `/myplugins`)
+### Account linking (for `/mystats`)
+
+**Built, low-friction version** (`discord_author_links` in schema.sql,
+`packages/db/src/authorLinks.ts`, and the bot's `/link`/`/unlink`/
+`/mystats` commands in `packages/discord-bot/src/commands/`) --
+trust-based, no verification step (see that option below). The
+dashboard's read-only "Linked authors" tab (`packages/api`'s
+`guilds/[guildId]/linked-authors` route, `LinkedAuthorsTab.tsx`) is also
+built: it reads the whole table (no `guild_id` column on it, see below)
+and filters down to this guild's current members live via the Discord
+API. The verified option below is still just an idea.
 
 **Linking is per Discord user, not per-server, and open to every member —
 not just the server owner/admins.** `/link` and `/unlink` are regular
@@ -205,11 +320,11 @@ cheaply and could be genuinely nice:
   post.
 - **Verified badge in bot output** — if the verified linking tier (see
   **Account linking**) ships, show a checkmark next to a linked author's
-  name in `/myplugins`/`/author` output — a visible reward for doing the
+  name in `/mystats`/`/author` output — a visible reward for doing the
   harder verification flow instead of the trust-based one.
-- **`/status`** — mirrors the site's `/api/status`: "data last updated 12
-  minutes ago". Trivial to build, reassures anyone wondering why a number
-  hasn't moved yet.
+- **`/status` — built** (see above), mirrors the site's `/api/status`:
+  catalog totals plus "data last updated 12 minutes ago". Reassures anyone
+  wondering why a number hasn't moved yet.
 - **Autocomplete everywhere** — worth calling out as a baseline UX
   requirement rather than a nice-to-have: every name-taking slash command
   option should live-autocomplete via `/api/search` instead of making
@@ -273,6 +388,6 @@ Fits the existing monorepo's pattern of one package per concern
    slash commands only).
 3. **Dashboard:** OAuth login, server picker, visual settings for
    everything phase 2 added via slash commands, plus the embed designer.
-4. **Account linking + `/myplugins`:** lowest-friction version first, one
-   game at a time is fine for an initial cut (RuneScape or RuneLite,
-   whichever the server leans toward) if both-at-once adds real complexity.
+4. **Account linking + `/mystats`: built** -- both games at once (one
+   link per Discord user per game, see **Account linking** above), ahead
+   of the dashboard (phase 3) actually landing.

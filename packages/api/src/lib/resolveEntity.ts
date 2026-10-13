@@ -1,4 +1,5 @@
 import { getAuthorIdBySlug, getPluginIdByNameId, type GameKey } from "@rspluginpulse/db";
+import { isInt4 } from "./validate";
 
 // Numeric ids are globally unique and need no game to disambiguate (the
 // original API contract, kept working unchanged); a pretty slug (a
@@ -15,7 +16,8 @@ async function resolveViaSlugOrId<T>(
   load: (id: number) => Promise<T | null>,
   resolveSlug: (slug: string, game: GameKey) => Promise<number | null>,
 ): Promise<T | null> {
-  let result = Number.isInteger(Number(idOrSlug)) ? await load(Number(idOrSlug)) : null;
+  const asNumber = Number(idOrSlug);
+  let result = isInt4(asNumber) ? await load(asNumber) : null;
   if (!result) {
     const slugId = await resolveSlug(idOrSlug, game);
     if (slugId !== null) result = await load(slugId);

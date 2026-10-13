@@ -1,5 +1,6 @@
 import { getCompareData, type CompareMetric, type CompareRange, type CompareType } from "@rspluginpulse/db";
 import { jsonWithCors, OPTIONS as corsOptions } from "@/lib/cors";
+import { isInt4 } from "@/lib/validate";
 
 export const OPTIONS = corsOptions;
 
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
   const keys = keysParam
     .split(",")
     .map((k) => Number(k.trim()))
-    .filter((k) => Number.isInteger(k));
+    .filter((k) => isInt4(k));
   if (keys.length === 0) {
     return jsonWithCors({ error: { status: 400, message: "keys must be a comma-separated list of ids" } }, { status: 400 });
   }

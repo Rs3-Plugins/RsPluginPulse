@@ -3195,6 +3195,10 @@ button.metric-tile:not(.active):hover {
   opacity: 0.5;
 }
 
+.loading-state img {
+  animation: ppPulse 1.2s ease-in-out infinite;
+}
+
 .empty-state .empty-title {
   font-size: 16px;
   font-weight: 600;
@@ -3378,6 +3382,65 @@ button.metric-tile:not(.active):hover {
 .dropdown-option.active {
   color: var(--goldLink);
   background: var(--band);
+}
+
+/* Profile dropdown (ProfileMenu.tsx) -- same base .dropdown-option as the
+   filter dropdowns, extended with an icon slot and a wider list so guild
+   names have room, plus a non-interactive "static" row for loading/error
+   text. */
+.dropdown-list--profile {
+  min-width: 220px;
+}
+
+a.dropdown-option {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.dropdown-option--static {
+  color: var(--dim);
+  cursor: default;
+}
+
+.dropdown-option--static:hover {
+  background: transparent;
+}
+
+.dropdown-option--guild {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dropdown-option--guild span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dropdown-option__icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.dropdown-option__icon--fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--raise);
+  border: 1px solid var(--line2);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--goldHi);
+}
+
+.dropdown-divider {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--line);
 }
 
 .hot-row {
@@ -3644,6 +3707,15 @@ button.metric-tile:not(.active):hover {
   color: var(--goldLink);
 }
 
+/* Standalone /terms /privacy /cookies pages -- .legal-body's own padding/
+   overflow above are sized for the footer modal's fixed-height dialog,
+   not a normal page flow. */
+.legal-page-body {
+  overflow-y: visible;
+  max-width: 720px;
+  padding: 0;
+}
+
 .legal-dialog-footer {
   display: flex;
   justify-content: flex-end;
@@ -3672,6 +3744,40 @@ button.metric-tile:not(.active):hover {
 
 .cta-pill:hover {
   color: var(--goldInk);
+}
+
+.legal-ok:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ---------- Subscribe modal (SubscribeModal.tsx) ---------- */
+.subscribe-price {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 14px 0 6px;
+}
+.subscribe-price b {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--goldHi);
+}
+.subscribe-price span {
+  font-size: 13px;
+  color: var(--muted);
+}
+.subscribe-dialog-footer {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.subscribe-dialog-footer .legal-ok {
+  justify-content: center;
+}
+.subscribe-dialog-footer span {
+  text-align: center;
+  font-size: 12px;
 }
 
 .author-profile-card {

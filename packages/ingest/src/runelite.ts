@@ -12,6 +12,38 @@ const PLUGIN_HUB_BASE = "https://runelite.net/plugin-hub/show";
 const REPO_RAW_BASE = "https://raw.githubusercontent.com/runelite/plugin-hub/master/plugins";
 const REPO_CONCURRENCY = 12;
 
+// RuneLite's own infra (static./repo./api.runelite.net) has occasional
+// transient blips (a 504 from api.runelite.net/.../pluginhub is what
+// prompted this) -- retried with backoff rather than letting one bad
+// moment fail the whole hourly ingest run outright. Only retries 5xx/429/
+// network errors; a 4xx (404, etc.) is a real, non-transient problem that
+// retrying won't fix, so that still fails immediately.
+async function fetchWithRetry(url: string, attempts = 4): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    let res: Response | undefined;
+    try {
+      res = await fetch(url);
+    } catch (error) {
+      lastError = error;
+    }
+    if (res) {
+      if (res.ok) return res;
+      // A 4xx (other than 429) is a real problem -- wrong URL, auth,
+      // whatever -- that retrying won't fix, so fail immediately instead
+      // of burning through attempts on something that'll never succeed.
+      if (res.status < 500 && res.status !== 429) throw new Error(`GET ${url} -> HTTP ${res.status}`);
+      lastError = new Error(`GET ${url} -> HTTP ${res.status}`);
+    }
+    if (attempt < attempts) {
+      const delayMs = 1000 * 2 ** (attempt - 1); // 1s, 2s, 4s
+      console.warn(`  ${url} failed (attempt ${attempt}/${attempts}), retrying in ${delayMs / 1000}s...`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError;
+}
+
 interface ManifestDisplayEntry {
   internalName: string;
   displayName: string;
@@ -30,8 +62,7 @@ interface Manifest {
 }
 
 async function getClientVersion(): Promise<string> {
-  const res = await fetch(BOOTSTRAP_URL);
-  if (!res.ok) throw new Error(`GET ${BOOTSTRAP_URL} -> HTTP ${res.status}`);
+  const res = await fetchWithRetry(BOOTSTRAP_URL);
   const data: any = await res.json();
   const clientArtifact = (data.artifacts ?? []).find((a: any) => /^client-/.test(a.name));
   if (!clientArtifact) throw new Error("bootstrap.json: no client artifact found");
@@ -44,8 +75,7 @@ async function getClientVersion(): Promise<string> {
 // length, the signature bytes, then the JSON body.
 async function getManifest(version: string): Promise<Manifest> {
   const url = `https://repo.runelite.net/plugins/manifest/${version}_full.js`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`GET ${url} -> HTTP ${res.status}`);
+  const res = await fetchWithRetry(url);
   const buf = Buffer.from(await res.arrayBuffer());
   const sigLen = buf.readUInt32BE(0);
   const jsonText = buf.subarray(4 + sigLen).toString("utf8");
@@ -54,8 +84,7 @@ async function getManifest(version: string): Promise<Manifest> {
 
 async function getInstallCounts(version: string): Promise<Record<string, number>> {
   const url = `https://api.runelite.net/runelite-${version}/pluginhub`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`GET ${url} -> HTTP ${res.status}`);
+  const res = await fetchWithRetry(url);
   return res.json();
 }
 

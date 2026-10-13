@@ -118,6 +118,50 @@ LockPersonality=true
 WantedBy=multi-user.target
 EOF
 
+# ---------------------------------------------------------------- discord bot service
+# Holds a Gateway connection open so the bot shows Online with a status,
+# and handles slash command interactions (see docs/discord-bot.md).
+# Type=simple/Restart=always like the API, NOT the ingest timer's
+# Type=oneshot: Discord presence only exists for the life of an open
+# Gateway session, so this has to stay connected rather than running
+# periodically.
+log "systemd service rspluginpulse-discord-bot"
+cat >/etc/systemd/system/rspluginpulse-discord-bot.service <<EOF
+[Unit]
+Description=rspluginpulse Discord bot (presence)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/packages/discord-bot
+EnvironmentFile=${APP_ROOT}/shared/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=5
+
+LimitNOFILE=65535
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=${APP_ROOT}
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 # ---------------------------------------------------------------- ingest timer
 log "systemd timer rspluginpulse-ingest (every ${INGEST_INTERVAL})"
 cat >/etc/systemd/system/rspluginpulse-ingest.service <<EOF
@@ -133,11 +177,15 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current
 EnvironmentFile=${APP_ROOT}/shared/.env
 # Each command's output goes to the journal (journalctl -u rspluginpulse-ingest)
-# -- no separate log file to rotate. '; true' on the first so a failed mod.io
-# run doesn't skip the RuneLite one; the overall unit's exit code (and the
+# -- no separate log file to rotate. '; true' between each so one script
+# failing doesn't skip the rest; the overall unit's exit code (and the
 # Discord webhook each script sends on its own failure) still reflect a
-# failure if either one did.
-ExecStart=/bin/bash -c 'npm run ingest -w @rspluginpulse/ingest; npm run ingest:runelite -w @rspluginpulse/ingest'
+# failure if any of them did. ingest:releases-hourly runs last, after the
+# snapshot ingests, so plugins.date_updated is already fresh by the time
+# it checks which plugins need a release-detail fetch (see that script's
+# own comment for why this is safe to run hourly unlike the weekly full
+# scan, ingest:releases, which stays on its own GitHub Actions schedule).
+ExecStart=/bin/bash -c 'npm run ingest -w @rspluginpulse/ingest; npm run ingest:runelite -w @rspluginpulse/ingest; npm run ingest:releases-hourly -w @rspluginpulse/ingest'
 EOF
 
 cat >/etc/systemd/system/rspluginpulse-ingest.timer <<EOF

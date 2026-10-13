@@ -1,0 +1,1799 @@
+/* PluginPulse for Discord -- UI-only build, ported from
+   design_handoff_discord/. Reuses the main site's existing design tokens
+   (--bg, --gold, --line2, etc. from styles.css) directly rather than the
+   handoff's separate --hdr* namespace, since this is the same brand/theme,
+   not an isolated product. Discord's own message/embed chrome (#26272b
+   etc.) stays fixed in both themes, same as the handoff specifies. */
+
+.dc-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- Header ----------
+   The header itself reuses the main site's .pp-hdr/.pp-nav/.pp-actions/
+   .pp-drawer straight from styles.css (see DiscordLayout.tsx) -- only the
+   "for Discord" badge and the signed-in profile bit are Discord-specific. */
+.dc-brand__badge {
+  margin-left: 4px;
+  height: 22px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  border: 1px solid var(--line2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.dc-hdr__profile-trigger {
+  height: 40px;
+  padding: 3px 10px 3px 4px;
+  gap: 8px;
+}
+.dc-hdr__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--raise);
+  border: 1px solid var(--line2);
+  object-fit: cover;
+  flex: none;
+}
+.dc-hdr__username {
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* ---------- Main ---------- */
+.dc-main {
+  flex: 1;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 clamp(14px, 4vw, 32px);
+  box-sizing: border-box;
+}
+
+/* ---------- Buttons ---------- */
+.dc-pill-primary {
+  height: 44px;
+  padding: 0 22px;
+  border-radius: 999px;
+  border: 1px solid var(--pillEdge);
+  background: var(--pillA);
+  color: var(--goldInk);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+.dc-pill-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.dc-pill-primary--block {
+  width: 100%;
+  height: 38px;
+}
+.dc-pill-outline {
+  height: 44px;
+  padding: 0 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  text-decoration: none;
+}
+.dc-pill-outline:hover {
+  border-color: var(--gold);
+}
+/* Discord's own blurple -- fixed across both themes like the rest of the
+   Discord-brand chrome in this file (message/embed mocks etc.), used for
+   the one button that's literally a Discord action (inviting the bot),
+   distinct from the gold dc-pill-primary used for everything else. */
+.dc-pill-invite {
+  background: #5865f2;
+  border-color: #5865f2;
+  color: #fff;
+}
+.dc-pill-invite:hover {
+  background: #4752c4;
+  border-color: #4752c4;
+}
+.dc-pill-outline--sm {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.dc-pill-outline--lg {
+  height: 44px;
+}
+.dc-pill-outline--block {
+  width: 100%;
+  height: 38px;
+}
+.dc-pill-outline--danger:hover {
+  color: var(--emberText);
+  border-color: var(--emberText);
+}
+
+/* ---------- Segmented control ---------- */
+.dc-seg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  align-self: flex-start;
+}
+.dc-seg--inline {
+  flex-wrap: wrap;
+}
+.dc-seg button {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.dc-seg button.active {
+  background: var(--raise);
+  box-shadow: 0 0 0 1px var(--line2);
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* ---------- Landing ---------- */
+.dc-hero {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 48px;
+  align-items: center;
+  padding: clamp(40px, 8vw, 88px) 0 56px;
+}
+.dc-hero__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.dc-eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.4em;
+  color: var(--gold);
+}
+.dc-h1 {
+  margin: 0;
+  font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05;
+  color: var(--text);
+  text-wrap: balance;
+  font-weight: 400;
+}
+.dc-hero__body {
+  margin: 0;
+  max-width: 52ch;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.dc-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.dc-note {
+  font-size: 12px;
+  color: var(--dim);
+}
+.dc-hero__demo {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dc-hero__cmd {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.dc-feature-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 72px;
+}
+.dc-feature-cell {
+  background: var(--surface);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dc-feature-cell b {
+  font-size: 15px;
+}
+.dc-feature-cell span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* ---------- Discord message/embed mocks (fixed colours, both themes) ---------- */
+.dc-discord-msg {
+  background: #26272b;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  gap: 12px;
+  color: #dcdde0;
+}
+.dc-discord-msg__avatar {
+  width: 40px;
+  height: 40px;
+  flex: none;
+}
+.dc-discord-msg__avatar--app {
+  border-radius: 999px;
+  background: #1b1a18;
+  padding: 4px;
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+}
+.dc-discord-msg__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dc-discord-msg__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  flex-wrap: wrap;
+}
+.dc-discord-msg__head b {
+  color: #f2f3f5;
+}
+.dc-discord-msg__time {
+  font-size: 12px;
+  color: #949ba4;
+}
+.dc-discord-msg__cmd {
+  font-size: 12px;
+  color: #949ba4;
+}
+.dc-discord-tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.dc-discord-tag--bot {
+  background: #caa44d;
+  color: #17120a;
+}
+.dc-discord-tag--app {
+  background: #5865f2;
+  color: #fff;
+}
+.dc-discord-mention {
+  align-self: flex-start;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(88, 101, 242, 0.3);
+  color: #c9cdfb;
+}
+
+.dc-embed {
+  border-left: 4px solid #caa44d;
+  background: #2e2f34;
+  border-radius: 4px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dc-embed__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dc-embed__title {
+  color: #e8c874;
+  font-size: 15px;
+}
+.dc-embed__by {
+  font-size: 11px;
+  color: #b5bac1;
+}
+.dc-embed__fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.dc-embed__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.dc-embed__field-k {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f2f3f5;
+}
+.dc-embed__field-v {
+  font-size: 13px;
+  color: #dcdde0;
+}
+.dc-embed__foot {
+  font-size: 11px;
+  color: #949ba4;
+}
+.dc-embed__linktitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #00a8fc;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.dc-embed__linktitle:hover {
+  text-decoration: underline;
+}
+.dc-embed__body {
+  font-size: 13px;
+  color: #dbdee1;
+  overflow-wrap: anywhere;
+}
+.dc-embed__link {
+  font-size: 12px;
+  color: #00a8fc;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.dc-embed__link:hover {
+  text-decoration: underline;
+}
+
+/* ---------- Server picker ---------- */
+.dc-servers {
+  padding: 40px 0 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.dc-page-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dc-h2 {
+  margin: 0;
+  font-size: 32px;
+  line-height: 1.1;
+  font-weight: 400;
+}
+.dc-guild-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 12px;
+}
+.dc-guild-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.dc-guild-card__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.dc-guild-icon {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  border-radius: 14px;
+  background: var(--raise);
+  border: 1px solid var(--line2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--goldHi);
+  object-fit: cover;
+}
+.dc-guild-icon--lg {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  font-size: 18px;
+}
+.dc-guild-icon--xs {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+.dc-guild-card__meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dc-guild-card__meta b {
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dc-guild-card__meta span {
+  font-size: 12px;
+  color: var(--dim);
+}
+
+/* ---------- Server settings shell ---------- */
+.dc-server {
+  padding: 28px 0 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.dc-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--dim);
+}
+.dc-breadcrumb__link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--goldLink);
+  cursor: pointer;
+  font-size: 13px;
+  text-decoration: none;
+}
+.dc-guild-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 24px;
+}
+.dc-guild-head__id {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 240px;
+}
+.dc-h3 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.1;
+  font-weight: 400;
+}
+.dc-dim {
+  color: var(--dim);
+  font-size: 13px;
+}
+.dc-muted {
+  color: var(--muted);
+}
+.dc-server-shell {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.dc-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 16px;
+}
+.dc-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+.dc-tab.active {
+  background: var(--raise);
+  box-shadow: inset 2px 0 0 var(--gold);
+  color: var(--text);
+  font-weight: 600;
+}
+.dc-tab__count {
+  font-size: 12px;
+  color: var(--dim);
+}
+.dc-tab-content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+@media (max-width: 899px) {
+  .dc-server-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .dc-tabs {
+    flex-direction: row;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    margin: 0 -2px;
+    position: static;
+  }
+  .dc-tab {
+    flex: none;
+    width: auto;
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line2);
+    white-space: nowrap;
+  }
+  .dc-tab.active {
+    border-color: var(--gold);
+    box-shadow: none;
+  }
+}
+
+/* ---------- Shared card/form primitives ---------- */
+.dc-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.dc-card--pad {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.dc-card--row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 14px 16px;
+}
+.dc-card__title {
+  font-size: 14px;
+}
+.dc-tab-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dc-h4 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.dc-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.dc-form-row--end {
+  align-items: flex-end;
+}
+.dc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dc-field > span:first-child {
+  font-size: 12px;
+  color: var(--muted);
+}
+.dc-field--grow {
+  flex: 1 1 220px;
+}
+.dc-field--num {
+  flex: none;
+}
+.dc-field--autocomplete {
+  position: relative;
+  flex: 1 1 220px;
+}
+
+.dc-input,
+.dc-select,
+.dc-textarea {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line2);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.dc-select {
+  padding: 0 10px;
+}
+.dc-select--sm {
+  height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.dc-select--role {
+  align-self: flex-start;
+  min-width: 200px;
+}
+.dc-input--xs {
+  width: 56px;
+  height: 30px;
+  padding: 0 6px;
+}
+.dc-textarea {
+  height: auto;
+  padding: 10px 12px;
+  resize: vertical;
+}
+.dc-mono {
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.dc-autocomplete {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  background: var(--raise);
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 4px 0;
+}
+.dc-autocomplete__row {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+.dc-autocomplete__row:hover {
+  background: var(--hover);
+}
+.dc-autocomplete__name {
+  flex: 1;
+  font-weight: 600;
+}
+.dc-autocomplete__meta {
+  font-size: 12px;
+  color: var(--dim);
+}
+/* .cmp-search-wrap's own `flex: 1 1 240px` is written for the Compare
+   page's *row* flex layout, where flex-basis sets its width. Nested here
+   inside a column-direction .dc-field instead, flex-basis sets its
+   *height* -- giving it ~240px of empty vertical space. Reset to a plain
+   full-width block so it just behaves like every other field. */
+.dc-plugin-search {
+  flex: none;
+  width: 100%;
+}
+.dc-autocomplete__tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  margin: 6px 10px 10px;
+  border-radius: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+}
+.dc-autocomplete__tabs button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    box-shadow 0.12s;
+}
+.dc-autocomplete__tabs button:hover {
+  color: var(--text);
+}
+.dc-autocomplete__tabs button img {
+  width: 17px;
+  height: 17px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex: none;
+}
+.dc-autocomplete__tabs button.active {
+  background: var(--raise);
+  box-shadow: 0 0 0 1px var(--gold);
+  color: var(--goldHi);
+  font-weight: 700;
+}
+.dc-autocomplete__empty {
+  padding: 14px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.dc-list {
+  overflow: hidden;
+}
+.dc-list__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.dc-list__row:last-child {
+  border-bottom: 0;
+}
+.dc-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--muted);
+}
+.dc-topic-count {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+/* Stretches both side-by-side cards to the taller sibling's height
+   (CSS grid's own exact answer to "match height", rather than guessing
+   row padding/counts) -- the list card becomes a flex column so any
+   leftover height shows as breathing room after the last row instead of
+   an empty gap outside the card's rounded border. */
+.dc-topic-cards-grid {
+  align-items: stretch;
+}
+.dc-topic-list-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.dc-watch-row__id {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.dc-watch-row__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dc-watch-row__name b {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dc-kind-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line2);
+  color: var(--muted);
+}
+.dc-watch-row__ch {
+  font-size: 13px;
+  color: var(--muted);
+  min-width: 110px;
+}
+.dc-watch-row__thresholds {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.dc-watch-row__dn-label {
+  margin-left: 6px;
+}
+.dc-watch-row__last {
+  font-size: 12px;
+  min-width: 120px;
+  color: var(--dim);
+}
+.dc-watch-row__last.is-up {
+  color: var(--goldHi);
+}
+.dc-watch-row__last.is-down {
+  color: var(--emberText);
+}
+
+.dc-cooldown__copy {
+  flex: 1 1 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dc-cooldown__copy b {
+  font-size: 13px;
+}
+
+.dc-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.dc-chip-btn {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  background: transparent;
+  color: var(--goldHi);
+  font-size: 12px;
+  cursor: pointer;
+}
+.dc-chip-btn:hover {
+  border-color: var(--gold);
+}
+.dc-chip-btn--danger {
+  color: var(--muted);
+}
+.dc-chip-btn--danger:hover {
+  color: var(--emberText);
+  border-color: var(--emberText);
+}
+
+/* ---------- Avatar picker (General tab) ---------- */
+.dc-avatar-picker {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.dc-avatar-picker__btn {
+  position: relative;
+  flex: none;
+  width: 104px;
+  height: 104px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  background: var(--raise);
+  color: var(--goldHi);
+  overflow: hidden;
+}
+.dc-avatar-picker__btn img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.dc-avatar-picker__placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 30px;
+  font-weight: 700;
+}
+/* Pencil/trash, centered over the avatar itself, revealed on hover/focus --
+   the only interactive controls here (avoids nesting a <button> inside a
+   <button>, since the avatar image is just a preview, not a trigger). */
+.dc-avatar-picker__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.dc-avatar-picker__btn:hover .dc-avatar-picker__overlay,
+.dc-avatar-picker__btn:focus-within .dc-avatar-picker__overlay {
+  opacity: 1;
+}
+.dc-avatar-picker__overlay button {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  cursor: pointer;
+}
+.dc-avatar-picker__overlay button:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+.dc-avatar-picker__overlay button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.dc-avatar-picker__meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* ---------- Avatar picker modal (General tab) ---------- */
+.avatar-picker-dialog {
+  max-width: 600px;
+}
+.avatar-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 10px;
+}
+.avatar-preset {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line2);
+  background: var(--surface2);
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+}
+.avatar-preset:hover {
+  border-color: var(--gold);
+  color: var(--text);
+}
+.avatar-preset:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.avatar-preset img {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--raise);
+  border: 1px solid var(--line2);
+}
+.avatar-preset span {
+  font-size: 11px;
+  text-align: center;
+}
+.avatar-upload-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px dashed var(--line2);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+.avatar-upload-card:hover {
+  border-color: var(--gold);
+  background: var(--surface2);
+}
+.avatar-upload-card__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: var(--raise);
+  border: 1px solid var(--line2);
+  color: var(--goldHi);
+}
+.avatar-upload-card__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.avatar-upload-card__text span {
+  font-size: 12px;
+}
+.avatar-upload-card:disabled {
+  cursor: default;
+}
+
+/* Base slot for the upload card -- owns the top spacing itself (rather
+   than the card having its own margin) so the locked overlay below, which
+   is inset:0 against this same box, lines up with the card exactly
+   instead of approximating an offset. */
+.avatar-upload-slot {
+  position: relative;
+  margin-top: 18px;
+  /* filter: blur() isn't clipped to the blurred element's own box -- without
+     this, the card's blur bleeds past its rounded corners and peeks out
+     from behind the overlay instead of staying fully covered by it. */
+  border-radius: 10px;
+  overflow: hidden;
+}
+.avatar-upload-locked .avatar-upload-card {
+  filter: blur(1px);
+  pointer-events: none;
+}
+.avatar-upload-locked__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 12px 20px;
+  border-radius: 10px;
+  background: rgba(10, 9, 7, 0.78);
+}
+.avatar-upload-locked__msg {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.avatar-upload-locked__msg svg {
+  flex: none;
+  color: var(--goldHi);
+}
+.avatar-upload-locked__msg span {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  text-align: left;
+}
+.avatar-upload-locked__msg b {
+  color: var(--text);
+}
+.avatar-upload-locked__overlay .legal-ok {
+  flex: none;
+}
+
+.avatar-cropper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+/* Checkerboard like Discord's own image-upload cropper -- shows through
+   wherever the (possibly zoomed-out) image doesn't reach the canvas edge. */
+.avatar-cropper__canvas {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border-radius: 10px;
+  background-color: #1b1a18;
+  background-image: linear-gradient(45deg, #2a2824 25%, transparent 25%), linear-gradient(-45deg, #2a2824 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #2a2824 75%),
+    linear-gradient(-45deg, transparent 75%, #2a2824 75%);
+  background-size: 16px 16px;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  border: 1px solid var(--line2);
+  touch-action: none;
+  cursor: grab;
+}
+.avatar-cropper__canvas:active {
+  cursor: grabbing;
+}
+.avatar-cropper__canvas img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  max-width: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+/* The box-shadow is what dims everything outside the square -- simplest
+   way to darken "canvas minus frame" without separate overlay divs. */
+.avatar-cropper__frame {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.avatar-cropper__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 300px;
+}
+.avatar-cropper__toolbar button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  background: var(--surface2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.avatar-cropper__toolbar button:hover:not(:disabled) {
+  border-color: var(--gold);
+  color: var(--text);
+}
+.avatar-cropper__toolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.avatar-cropper__toolbar input[type="range"] {
+  flex: 1;
+}
+.avatar-cropper__footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.avatar-cropper__spacer {
+  flex: 1;
+}
+.avatar-cropper__preview {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--raise);
+  border: 1px solid var(--line2);
+}
+.avatar-cropper__preview img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  max-width: none;
+  user-select: none;
+}
+.dc-ph-chip {
+  height: 22px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  color: var(--goldHi);
+  font-size: 11px;
+}
+
+/* Mimics Discord's own channel header bar (hash + bold name, topic text
+   below) rather than a generic box -- used for the Channel topics tab's
+   live preview, see ChannelTopicsTab.tsx. */
+.dc-channel-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #26272b;
+  border: 1px solid #1b1a18;
+}
+.dc-channel-preview__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #35363c;
+}
+.dc-channel-preview__hash {
+  font-size: 18px;
+  font-weight: 700;
+  color: #80848e;
+}
+.dc-channel-preview__name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f2f3f5;
+}
+.dc-channel-preview__category {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #80848e;
+}
+.dc-channel-preview__topic {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #b5bac1;
+  overflow-wrap: anywhere;
+}
+.dc-channel-preview__count {
+  align-self: flex-end;
+  font-size: 11px;
+  color: #80848e;
+}
+.dc-channel-preview__count.is-over {
+  color: #e35d6f;
+}
+
+.dc-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.dc-form-actions--center {
+  justify-content: center;
+  margin-top: 4px;
+}
+.dc-topic-form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.dc-hidden-input {
+  display: none;
+}
+
+/* ---------- Channel topics ---------- */
+.dc-topic-row__id {
+  flex: 1 1 300px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dc-topic-row__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.dc-topic-row__out {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dc-topic-row__status {
+  font-size: 12px;
+}
+.dc-topic-row__actions {
+  display: flex;
+  gap: 6px;
+}
+.dc-admin-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex: none;
+}
+/* Full-card subscriber-only upsell (AdvancedSettingsTab.tsx's locked
+   state) -- a centered icon/title/description/button empty-state, not
+   reusing .dc-topic-row__id (that's built for horizontal list rows; its
+   flex: 1 1 300px stretches to fill a *column* layout's full height
+   instead, which is what made this card look oversized before). */
+.dc-locked-feature {
+  align-items: center;
+  text-align: center;
+  padding: 40px 24px;
+  gap: 12px;
+}
+.dc-locked-feature__icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface2);
+  border: 1px solid var(--line2);
+  color: var(--goldHi);
+}
+.dc-locked-feature__title {
+  font-size: 15px;
+}
+.dc-locked-feature__desc {
+  max-width: 420px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+/* "Coming soon" placeholder (AnnouncementsTab.tsx's Global tab, for now)
+   -- unlike .dc-locked-feature, this keeps the real UI mounted and
+   visible underneath (so it still reads as "a feature exists here"),
+   just blurred and non-interactive, with a centered badge on top. */
+.dc-coming-soon {
+  position: relative;
+}
+.dc-coming-soon__content {
+  filter: blur(6px);
+  pointer-events: none;
+  user-select: none;
+}
+.dc-coming-soon__badge {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  padding: 24px;
+}
+.dc-coming-soon__badge b {
+  font-size: 15px;
+  padding: 8px 20px;
+  border-radius: 999px;
+  background: var(--surface2);
+  border: 1px solid var(--line2);
+  color: var(--goldHi);
+}
+.dc-coming-soon__badge p {
+  max-width: 360px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+/* PingField's checkmark column (AnnouncementsTab.tsx) -- fixed width so
+   role names stay aligned whether or not a given row is checked, instead
+   of the label shifting left/right as items toggle. */
+.dc-role-check {
+  display: inline-block;
+  width: 14px;
+  color: var(--goldHi);
+}
+/* Sits next to the Every 5h/1h dc-seg control -- a live countdown to when
+   the soonest-due binding will next be checked (see ChannelTopicsTab.tsx's
+   nextUpdateLabel). */
+.dc-next-update {
+  font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.dc-topic-row {
+  /* A bit taller than the shared .dc-list__row default -- this card sits
+     next to the (fairly tall) "Bind a channel" card, so extra breathing
+     room here helps the two roughly match height instead of the list
+     looking noticeably shorter. */
+  padding-top: 20px;
+  padding-bottom: 20px;
+}
+.dc-topic-row--empty {
+  justify-content: center;
+}
+.dc-topic-row--empty .dc-dim {
+  font-style: italic;
+}
+.dc-topic-row--locked {
+  background: var(--surface2);
+}
+.dc-topic-row--locked .dc-topic-row__head svg {
+  color: var(--dim);
+}
+/* Wraps a Global watch/Per-entity binding row plus its own "Test" result
+   (AnnouncementsTab.tsx) -- the border that used to live directly on
+   .dc-list__row has to move to the wrapper's :last-child instead, since
+   each row's no longer a direct child of .dc-list once it's wrapped. */
+.dc-topic-row-wrap:last-child .dc-list__row {
+  border-bottom: 0;
+}
+.dc-topic-test-result {
+  padding: 0 16px 14px;
+  margin-top: -8px;
+}
+.dc-topic-row-wrap:last-child .dc-topic-test-result {
+  padding-bottom: 16px;
+}
+
+/* ---------- Announcements ---------- */
+.dc-ann-card__head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.dc-ann-card__headtext {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dc-ann-card__headtext b {
+  font-size: 15px;
+}
+.dc-ann-card__body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 20px;
+  padding: 16px;
+  align-items: start;
+}
+.dc-ann-card__settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.dc-switch {
+  position: relative;
+  width: 40px;
+  height: 24px;
+  flex: none;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  background: var(--surface2);
+  cursor: pointer;
+  padding: 0;
+}
+.dc-switch.on {
+  border-color: var(--pillEdge);
+  background: var(--gold);
+}
+.dc-switch.locked {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.dc-switch__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--muted);
+  transition: left 0.15s;
+}
+.dc-switch.on .dc-switch__knob {
+  left: 18px;
+  background: var(--goldInk);
+}
+
+.dc-chip-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dc-toggle-chip {
+  height: 30px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+.dc-toggle-chip.on {
+  border-color: var(--gold);
+  background: var(--raise);
+  color: var(--goldHi);
+  font-weight: 600;
+}
+
+.dc-warn {
+  font-size: 12px;
+  color: var(--emberText);
+}
+.dc-warn--loud {
+  color: var(--goldHi);
+}
+/* MissingPermissionsNotice.tsx -- same tone as .dc-warn, plus an inline
+   re-invite link since this failure always has the same one-click fix. */
+.dc-perm-warn {
+  margin: 0;
+  font-size: 12px;
+  color: var(--emberText);
+}
+.dc-perm-warn__link {
+  color: var(--goldHi);
+  text-decoration: underline;
+}
+
+.dc-ann-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ---------- Embed design ---------- */
+.dc-embed-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.dc-swatches {
+  display: flex;
+  gap: 8px;
+}
+.dc-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 0;
+  cursor: pointer;
+}
+.dc-field-chip {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+.dc-field-chip.on {
+  border-color: var(--gold);
+  background: var(--raise);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.dc-embed-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: sticky;
+  top: 16px;
+}
+.dc-embed-preview__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.dc-embed-pv__top {
+  display: flex;
+  gap: 12px;
+}
+.dc-embed-pv__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dc-embed-pv__text b {
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.dc-embed-pv__thumb {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border-radius: 6px;
+  background: #1b1a18;
+  padding: 6px;
+  box-sizing: border-box;
+}
+.dc-embed-pv__fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dc-stats-card {
+  border-radius: 6px;
+  background: linear-gradient(180deg, #1b1a18, #0d0d0d);
+  border: 1px solid #2a2620;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dc-stats-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.dc-stats-card__name {
+  font-size: 15px;
+  line-height: 1.1;
+  color: #ece6d6;
+}
+.dc-stats-card__brand {
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: 0.3em;
+  color: #caa44d;
+}
+.dc-stats-card__body {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dc-stats-card__big {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dc-stats-card__big span:first-child {
+  font-size: 22px;
+  font-weight: 700;
+  color: #e8c874;
+}
+.dc-stats-card__big span.dc-dim {
+  font-size: 11px;
+  color: #a69e8a;
+}
+
+/* ---------- Commands ---------- */
+.dc-cmd-group__label {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.dc-cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.dc-cmd-row:last-child {
+  border-bottom: 0;
+}
+.dc-cmd-row__id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dc-cmd-row__id span:first-child {
+  font-size: 13px;
+  color: var(--text);
+}
+.dc-cmd-row__id span:last-child {
+  font-size: 12px;
+  color: var(--dim);
+}
+
+/* ---------- Linked authors ---------- */
+.dc-links-table {
+  overflow-x: auto;
+}
+.dc-links-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) 90px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  min-width: 560px;
+}
+.dc-links-row:last-child {
+  border-bottom: 0;
+}
+.dc-links-row--head {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding: 10px 16px;
+}
+.dc-links-row__member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.dc-links-row__member span:last-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dc-verified {
+  margin-left: 6px;
+  color: var(--gold);
+}

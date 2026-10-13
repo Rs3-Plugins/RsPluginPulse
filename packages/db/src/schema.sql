@@ -53,6 +53,16 @@ ALTER TABLE plugins ALTER COLUMN game SET DEFAULT 'runescape';
 
 CREATE INDEX IF NOT EXISTS plugins_game_idx ON plugins (game);
 
+-- getPluginIdByNameId's hot path (WHERE game = $1 AND name_id = $2) --
+-- every plugin page/card/badge resolves its URL slug through this query,
+-- and without a composite index it can only narrow down via
+-- plugins_game_idx above, then filter name_id row by row. Not UNIQUE: a
+-- plain idempotent CREATE INDEX can't fail a migration run even if some
+-- future data quality issue ever produced a duplicate (game, name_id)
+-- pair, unlike a unique index, which would throw and break the whole
+-- schema.sql batch for everyone.
+CREATE INDEX IF NOT EXISTS plugins_game_name_id_idx ON plugins (game, name_id);
+
 -- Stable integer ids for entities that don't have a native numeric id
 -- upstream (e.g. RuneLite plugins keyed by internalName, authors keyed by
 -- GitHub login). Minted once per (game, kind, external_key) and reused on
@@ -252,4 +262,244 @@ CREATE TABLE IF NOT EXISTS plugin_releases (
 -- pluginHubReleases.ts for how 'unavailable' gets classified.
 ALTER TABLE plugin_releases ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'update';
 
+-- "Log in with Discord" sessions for the /discord dashboard (identify +
+-- guilds scopes -- a separate OAuth2 flow from the bot-install "Add to
+-- Discord" one, see docs/discord-bot.md). id is the opaque random token
+-- that lives in the session cookie; looking it up is the only way to read
+-- a row, so there's no need to encrypt the Discord tokens at rest beyond
+-- normal DB access control. access_token is used to list the user's own
+-- guilds; refresh_token lets that keep working past the ~7 day access
+-- token expiry without forcing a re-login.
+CREATE TABLE IF NOT EXISTS discord_sessions (
+  id TEXT PRIMARY KEY,
+  discord_user_id TEXT NOT NULL,
+  username TEXT NOT NULL,
+  avatar_hash TEXT,
+  access_token TEXT NOT NULL,
+  refresh_token TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS discord_sessions_user_idx ON discord_sessions (discord_user_id);
+
 CREATE INDEX IF NOT EXISTS plugin_releases_plugin_idx ON plugin_releases (plugin_id, released_at);
+
+-- Per-guild channel-topic bindings (docs/discord-bot.md's "Channel
+-- description templates"): an admin picks a plugin or author and a
+-- template string for one channel, re-rendered hourly by
+-- packages/discord-bot (same cadence as ingest) and pushed via Discord's
+-- "modify channel" endpoint. channel_id alone is UNIQUE (not a composite
+-- with guild_id) because Discord snowflakes are already globally unique,
+-- and a channel only has one topic -- binding a new entity/template to an
+-- already-bound channel replaces it rather than adding a second one.
+-- last_rendered_topic/last_rendered_at let the worker skip a channel whose
+-- rendered topic hasn't actually changed since last time, instead of
+-- retry-storming Discord's channel-edit rate limit every tick.
+CREATE TABLE IF NOT EXISTS discord_channel_topics (
+  id SERIAL PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL UNIQUE,
+  channel_name TEXT NOT NULL,
+  entity_kind TEXT NOT NULL CHECK (entity_kind IN ('plugin', 'author')),
+  entity_id INTEGER NOT NULL,
+  entity_name TEXT NOT NULL,
+  template TEXT NOT NULL,
+  last_rendered_topic TEXT,
+  last_rendered_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS discord_channel_topics_guild_idx ON discord_channel_topics (guild_id);
+
+-- Per-guild channel-topic refresh cadence -- free tier is fixed at the
+-- default (5h), subscribers can drop it to as low as 1h (see
+-- packages/api/src/lib/subscriptions.ts). A faster interval means more
+-- frequent getPluginInfo/getAuthorProfile reads from packages/discord-bot's
+-- hourly worker, which is exactly why it's gated rather than free for
+-- everyone. No row = use the default; only written when someone actually
+-- changes it away from that.
+CREATE TABLE IF NOT EXISTS discord_guild_topic_settings (
+  guild_id TEXT PRIMARY KEY,
+  refresh_interval_hours INTEGER NOT NULL DEFAULT 5,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Per-guild dashboard admins -- a step up from the ordinary Manage Server
+-- gate every /discord route already requires (see discordAuth.ts's
+-- requireManageableGuild): plenty of people can have Manage Server on a
+-- big server without the owner wanting them to see/manage its other
+-- admins or force-push channel topics. The guild's own Discord owner is
+-- always implicitly an admin too (checked via Discord's own `owner` flag,
+-- not a row here) -- this table only holds the *extra* admins someone's
+-- been explicitly promoted to. added_by records which admin (or the
+-- owner) granted it, purely for the admin panel's own "who added this"
+-- display. This whole per-guild panel is itself gated behind the guild's
+-- own subscription (see discord_guild_subscriptions below) -- granting
+-- the subscription in the first place is the *site-wide* admin panel's
+-- job (site_admins below), not this table's.
+CREATE TABLE IF NOT EXISTS discord_guild_admins (
+  id SERIAL PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  discord_user_id TEXT NOT NULL,
+  added_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (guild_id, discord_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS discord_guild_admins_guild_idx ON discord_guild_admins (guild_id);
+
+-- Site-wide mods -- a different, higher tier than discord_guild_admins
+-- above: those are scoped to one guild and granted by that guild's own
+-- owner; these are the *site* owner's own staff, with visibility and
+-- control across every guild the bot's in. The bootstrap owner(s) are an
+-- env var (SITE_OWNER_DISCORD_IDS, checked in discordAuth.ts, never a row
+-- here) so there's no chicken-and-egg problem for who grants the very
+-- first mod -- everyone added after that is a row in this table, with the
+-- exact same global powers: see every guild the bot's in, grant/revoke
+-- any guild's subscription. Reached from the profile dropdown's "Admin
+-- Management" entry, not from any one guild's own settings.
+CREATE TABLE IF NOT EXISTS site_admins (
+  id SERIAL PRIMARY KEY,
+  discord_user_id TEXT NOT NULL UNIQUE,
+  added_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Mod-granted subscription per guild -- there's no real billing yet (see
+-- packages/db/src/subscriptions.ts), so until there is, this is the
+-- actual entitlement mechanism. Only ever written by the site-wide admin
+-- panel (a site_admins mod, or the SITE_OWNER_DISCORD_IDS bootstrap) --
+-- *not* self-service by a guild's own discord_guild_admins, which is the
+-- thing this gates, not the thing that grants itself. A row existing
+-- means subscribed; granted_by is who flipped it on, purely for display.
+CREATE TABLE IF NOT EXISTS discord_guild_subscriptions (
+  guild_id TEXT PRIMARY KEY,
+  granted_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Announcements -- the Global tab's rows (docs/discord-bot.md's
+-- "Notifications" section): a flexible list, not fixed slots -- a guild
+-- can have as many of these as it wants (e.g. one channel for RuneScape
+-- releases, another for RuneLite updates, another posting both kinds to
+-- a general channel). `kind` is which event this row fires on; `games`
+-- filters which catalog(s) it applies to. last_announced_at is a cursor
+-- (same pattern as discord_channel_topics' last_rendered_at) -- defaults
+-- to the row's own creation time so turning a watch on never retroactively
+-- floods the channel with everything that happened before it existed;
+-- advanced forward after each successful post so nothing gets announced
+-- twice. Per-plugin/author bindings (discord_entity_announcements below) are
+-- additive, not a replacement -- a plugin matching both a global rule and
+-- having its own per-plugin binding gets posted to *both* channels.
+--
+-- Ping is three independent signals, not one mutually-exclusive mode:
+-- ping_here/ping_everyone (mutually exclusive with *each other* --
+-- there's no point pinging both, @everyone already covers @here -- but
+-- NOT with ping_role_ids) can be combined with any set of roles, e.g.
+-- "@here plus @Moderators" in the same post. Discord's own
+-- allowed_mentions API already supports this combination natively.
+CREATE TABLE IF NOT EXISTS discord_announcement_watches (
+  id SERIAL PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  channel_name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('release', 'update')),
+  games TEXT[] NOT NULL DEFAULT ARRAY['runescape', 'runelite'],
+  ping_here BOOLEAN NOT NULL DEFAULT false,
+  ping_everyone BOOLEAN NOT NULL DEFAULT false,
+  ping_role_ids TEXT[] NOT NULL DEFAULT '{}',
+  ping_role_names TEXT[] NOT NULL DEFAULT '{}',
+  show_thumbnail BOOLEAN NOT NULL DEFAULT true,
+  last_announced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (NOT (ping_here AND ping_everyone))
+);
+
+CREATE INDEX IF NOT EXISTS discord_announcement_watches_guild_idx ON discord_announcement_watches (guild_id);
+
+-- The Per-plugin/author tab's rows -- same idea as discord_channel_topics
+-- (entity_kind/entity_id/entity_name, either a specific plugin or a
+-- specific author), but for announcements instead of a channel topic:
+-- "also post updates/the debut of *this specific* plugin (or *any*
+-- plugin by this specific author) into *this specific* channel",
+-- independent of (and additive to) any Global watch rule that also
+-- happens to match it. No FK to plugins(id)/authors -- same convention
+-- as discord_channel_topics' entity_id, a plain int reference.
+CREATE TABLE IF NOT EXISTS discord_entity_announcements (
+  id SERIAL PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  channel_name TEXT NOT NULL,
+  entity_kind TEXT NOT NULL CHECK (entity_kind IN ('plugin', 'author')),
+  entity_id INTEGER NOT NULL,
+  entity_name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('release', 'update', 'both')),
+  ping_here BOOLEAN NOT NULL DEFAULT false,
+  ping_everyone BOOLEAN NOT NULL DEFAULT false,
+  ping_role_ids TEXT[] NOT NULL DEFAULT '{}',
+  ping_role_names TEXT[] NOT NULL DEFAULT '{}',
+  show_thumbnail BOOLEAN NOT NULL DEFAULT true,
+  last_announced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (guild_id, channel_id, entity_kind, entity_id),
+  CHECK (NOT (ping_here AND ping_everyone))
+);
+
+CREATE INDEX IF NOT EXISTS discord_entity_announcements_guild_idx ON discord_entity_announcements (guild_id);
+CREATE INDEX IF NOT EXISTS discord_entity_announcements_entity_idx ON discord_entity_announcements (entity_kind, entity_id);
+
+-- The Embed builder tab's per-guild config -- one row per guild, same
+-- shape as discord_guild_topic_settings (no row = defaults). Gated
+-- behind the guild's subscription (see subscriptions.ts) same as
+-- Advanced Settings -- a free-tier guild's announcements still post,
+-- just with these defaults rather than a customized look.
+CREATE TABLE IF NOT EXISTS discord_guild_announcement_embed (
+  guild_id TEXT PRIMARY KEY,
+  color TEXT NOT NULL DEFAULT '#caa44d',
+  title_template TEXT NOT NULL DEFAULT '{verb}: {name}',
+  description_template TEXT NOT NULL DEFAULT '{name} {verb_lower} on {site}, by {author}.',
+  footer_template TEXT NOT NULL DEFAULT '{game} plugin',
+  show_thumbnail BOOLEAN NOT NULL DEFAULT true,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Discord-account-to-author links ("Linked authors" dashboard tab, see
+-- docs/discord-bot.md's "Account linking" section) -- the first table in
+-- this file that's deliberately *not* per-guild: a Discord user's author
+-- identity doesn't change between servers, so one link covers every guild
+-- the bot shares with them (the "Linked authors" tab filters this down to
+-- just the current guild's members live via the Discord API, rather than
+-- storing a guild_id here). Low-friction/trust-based, same as the doc's
+-- chosen "ship the simple version first" option -- /link just takes the
+-- member's word for it, since this only grants *read* access to numbers
+-- that are already public via /author. One row per (discord_user_id,
+-- game): a user can link a RuneScape (mod.io) identity, a RuneLite
+-- identity, or both independently, since the two catalogs have entirely
+-- separate author id spaces.
+CREATE TABLE IF NOT EXISTS discord_author_links (
+  id SERIAL PRIMARY KEY,
+  discord_user_id TEXT NOT NULL,
+  game TEXT NOT NULL CHECK (game IN ('runescape', 'runelite')),
+  author_id INT NOT NULL,
+  author_name TEXT NOT NULL,
+  linked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (discord_user_id, game)
+);
+CREATE INDEX IF NOT EXISTS discord_author_links_user_idx ON discord_author_links (discord_user_id);
+
+-- Per-server command toggles (docs/discord-bot.md's "Per-server command
+-- toggles" section), checked by the bot's own interactionCreate handler
+-- before running a command (packages/discord-bot/src/index.ts) and
+-- written from the dashboard's Commands tab. "Missing = on": a row here
+-- means that command is *disabled* for that guild, rather than storing
+-- an enabled/disabled boolean per command per guild -- a freshly invited
+-- guild (no rows at all) gets every command enabled by default with
+-- nothing to seed, and re-enabling a command is just deleting its row.
+CREATE TABLE IF NOT EXISTS discord_command_toggles (
+  id SERIAL PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  command_name TEXT NOT NULL,
+  UNIQUE (guild_id, command_name)
+);
+CREATE INDEX IF NOT EXISTS discord_command_toggles_guild_idx ON discord_command_toggles (guild_id);

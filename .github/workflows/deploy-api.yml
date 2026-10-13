@@ -9,6 +9,7 @@ on:
       - 'packages/db/**'
       - 'packages/api/**'
       - 'packages/ingest/**'
+      - 'packages/discord-bot/**'
       - 'package.json'
       - 'package-lock.json'
       - 'deploy/**'
@@ -51,14 +52,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build
-          # Everything needed to run `next start` plus ingest's tsx scripts:
-          # root package.json/lockfile + hoisted node_modules, each
+          # Everything needed to run `next start` plus ingest's and the
+          # discord bot's tsx scripts: root package.json/lockfile + hoisted
+          # node_modules, each
           # workspace's source, and deploy/ for release.sh/configure.sh.
           cp -r node_modules build/node_modules
           cp package.json package-lock.json build/
           mkdir -p build/packages
           cp -r packages/db build/packages/db
           cp -r packages/ingest build/packages/ingest
+          cp -r packages/discord-bot build/packages/discord-bot
           mkdir -p build/packages/api
           cp -r packages/api/.next build/packages/api/.next
           cp packages/api/package.json packages/api/next.config.ts build/packages/api/
@@ -72,6 +75,11 @@ jobs:
       - name: Render .env
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+          DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
+          DISCORD_REDIRECT_URI: ${{ vars.DISCORD_REDIRECT_URI }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          WEB_APP_URL: ${{ vars.WEB_APP_URL }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
