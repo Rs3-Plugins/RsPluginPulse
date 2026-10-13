@@ -33,8 +33,13 @@ function useNextRefresh(game: Game): string | null {
 }
 
 function formatNextRefreshTime(lastUpdatedMs: number): string {
-  const nextAt = new Date(lastUpdatedMs + INGEST_INTERVAL_MS);
-  return nextAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const nextAtMs = lastUpdatedMs + INGEST_INTERVAL_MS;
+  // The estimate is computed once (no polling, see useNextRefresh above), so
+  // if the real ingest run is overdue (failing, or just running late) this
+  // would otherwise show a clock time already in the past as if it were
+  // still upcoming.
+  if (nextAtMs <= Date.now()) return "any moment";
+  return new Date(nextAtMs).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 export function Footer() {

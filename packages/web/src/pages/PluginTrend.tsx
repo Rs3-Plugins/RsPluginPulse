@@ -231,9 +231,22 @@ export function PluginTrend() {
   }
 
   const metrics = trendMetrics(plugin.game);
-  const activeMetric = metrics.find((m) => m.key === metric)!;
+  // Falls back to the first entry for a stale/bookmarked ?metric= value
+  // that trendMetrics no longer offers for this game (e.g. "downloadsToday"
+  // on a RuneLite plugin, which has no such metric).
+  const activeMetric = metrics.find((m) => m.key === metric) ?? metrics[0];
   const last = points[points.length - 1];
   const tiles = metrics.map((m) => ({ ...m, ...tileValueAndSub(points, m.key) }));
+  // RuneLite has no real daily figure (downloadsToday is always 0, see
+  // runelite.ts) -- a real "today" number for that plugin's live install
+  // gauge is the change since ~24h ago instead, same basis findPointNear
+  // already uses for the other tiles' "gained" sub-labels. Display-only,
+  // not a selectable chart metric (there's no "change" series to plot).
+  const todayChange = plugin.game === "runelite" ? last.downloadsTotal - findPointNear(points, 1).downloadsTotal : null;
+  // Same idea as todayChange, just over 30 days -- a monthly figure that
+  // actually means something for a live gauge, unlike subscribersTotal
+  // (which used to sit here as a redundant duplicate of Total installs).
+  const monthlyChange = plugin.game === "runelite" ? last.downloadsTotal - findPointNear(points, 30).downloadsTotal : null;
   const compareIds = [plugin.id, ...(hotPlugins ?? []).filter((p) => p.id !== plugin.id).slice(0, 2).map((p) => p.id)];
   const compact = plugin.game === "runelite";
   const authorEntries = plugin.coAuthors;
@@ -391,29 +404,69 @@ export function PluginTrend() {
         </div>
       </div>
 
-      <div className="metric-tiles" role="radiogroup" aria-label="Metric">
-        {tiles.map((t) => (
-          <button key={t.key} className={`metric-tile ${metric === t.key ? "active" : ""}`} onClick={() => setMetric(t.key)}>
-            <span className="metric-tile-top">
-              <span className="metric-tile-label">{t.label}</span>
-              {metric === t.key ? (
-                <span className="metric-tile-charted">
-                  <span className="metric-tile-charted-swatch" />
-                  Charted
+      <div className="metric-tiles" role={metrics.length > 1 ? "radiogroup" : undefined} aria-label={metrics.length > 1 ? "Metric" : undefined}>
+        {/* RuneLite only ever has one real chartable series (its live
+            install gauge, see trendMetrics) -- with nothing to actually
+            choose between, these render as plain stat cards instead of
+            the mod.io-style selectable "pick what's charted" tiles. */}
+        {metrics.length > 1
+          ? tiles.map((t) => (
+              <button key={t.key} className={`metric-tile ${activeMetric.key === t.key ? "active" : ""}`} onClick={() => setMetric(t.key)}>
+                <span className="metric-tile-top">
+                  <span className="metric-tile-label">{t.label}</span>
+                  {activeMetric.key === t.key ? (
+                    <span className="metric-tile-charted">
+                      <span className="metric-tile-charted-swatch" />
+                      Charted
+                    </span>
+                  ) : (
+                    <span className="metric-tile-hint">Show on chart →</span>
+                  )}
                 </span>
-              ) : (
-                <span className="metric-tile-hint">Show on chart →</span>
-              )}
+                <span className="metric-tile-value">{last[t.key].toLocaleString()}</span>
+                <span className="metric-tile-sub">{t.sub}</span>
+              </button>
+            ))
+          : tiles.map((t) => (
+              <div key={t.key} className="metric-tile">
+                <span className="metric-tile-top">
+                  <span className="metric-tile-label">{t.label}</span>
+                </span>
+                <span className="metric-tile-value">{last[t.key].toLocaleString()}</span>
+                <span className="metric-tile-sub">{t.sub}</span>
+              </div>
+            ))}
+        {todayChange !== null && (
+          <div className="metric-tile">
+            <span className="metric-tile-top">
+              <span className="metric-tile-label">Change today</span>
             </span>
-            <span className="metric-tile-value">{last[t.key].toLocaleString()}</span>
-            <span className="metric-tile-sub">{t.sub}</span>
-          </button>
-        ))}
+            <span className="metric-tile-value">
+              {todayChange >= 0 ? "+" : ""}
+              {todayChange.toLocaleString()}
+            </span>
+            <span className="metric-tile-sub">vs. this time yesterday</span>
+          </div>
+        )}
+        {monthlyChange !== null && (
+          <div className="metric-tile">
+            <span className="metric-tile-top">
+              <span className="metric-tile-label">Installs monthly</span>
+            </span>
+            <span className="metric-tile-value">
+              {monthlyChange >= 0 ? "+" : ""}
+              {monthlyChange.toLocaleString()}
+            </span>
+            <span className="metric-tile-sub">last 30 days</span>
+          </div>
+        )}
       </div>
 
       <TrendChart
         points={points}
-        metric={metric}
+        pluginId={plugin.id}
+        game={plugin.game}
+        metric={activeMetric.key}
         scoreMetric={plugin.game === "runelite" ? "downloadsTotal" : "downloadsToday"}
         metricLabel={activeMetric.label}
         unit={activeMetric.unit}

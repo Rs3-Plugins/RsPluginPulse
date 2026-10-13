@@ -4,6 +4,11 @@ import type { ChartType } from "./TrendChart";
 
 interface Props {
   open: boolean;
+  // Today/24h has no annotation data (events/updates/releases/milestones
+  // are all computed against the daily series) -- this hides just those
+  // sections and the sensitivity slider, not the whole menu. Chart type
+  // and export still apply to any series, recent or daily.
+  annotationsDisabled?: boolean;
   onToggle: () => void;
   chartType: ChartType;
   onChartTypeChange: (type: ChartType) => void;
@@ -65,6 +70,7 @@ const LAYERS: { key: keyof AnnotationLayers; label: string; sub: (releaseFromLab
 // button -- see design_handoff_trend_chart/README.md's Controls section.
 export function ChartSettingsMenu({
   open,
+  annotationsDisabled,
   onToggle,
   chartType,
   onChartTypeChange,
@@ -83,7 +89,7 @@ export function ChartSettingsMenu({
       <button type="button" className="ppc-btn" aria-haspopup="dialog" aria-expanded={open} onClick={onToggle}>
         <SlidersIcon />
         Chart settings
-        {offCount > 0 && <span className="ppc-badge">{offCount} off</span>}
+        {!annotationsDisabled && offCount > 0 && <span className="ppc-badge">{offCount} off</span>}
       </button>
 
       {open && (
@@ -102,60 +108,68 @@ export function ChartSettingsMenu({
             </div>
           </div>
 
-          <div className="ppc-sec ppc-sec--layers">
-            <span className="ppc-eyebrow">Annotations</span>
-            {LAYERS.map((l) => (
-              <label className="ppc-layer" key={l.key}>
-                <span className="ppc-layer-ic">{l.icon}</span>
-                <span className="ppc-layer-txt">
-                  <span className="ppc-layer-label">{l.label}</span>
-                  <span className="ppc-small">{l.sub(releaseFromLabel)}</span>
-                </span>
-                <button
-                  type="button"
-                  className="ppc-switch"
-                  role="switch"
-                  aria-checked={layers[l.key]}
-                  aria-label={l.label}
-                  onClick={() => onLayersChange({ ...layers, [l.key]: !layers[l.key] })}
-                />
-              </label>
-            ))}
-          </div>
+          {annotationsDisabled ? (
+            <div className="ppc-sec">
+              <span className="ppc-note">Annotations and marker sensitivity aren&rsquo;t available for Today/24h -- there&rsquo;s no daily data to annotate.</span>
+            </div>
+          ) : (
+            <>
+              <div className="ppc-sec ppc-sec--layers">
+                <span className="ppc-eyebrow">Annotations</span>
+                {LAYERS.map((l) => (
+                  <label className="ppc-layer" key={l.key}>
+                    <span className="ppc-layer-ic">{l.icon}</span>
+                    <span className="ppc-layer-txt">
+                      <span className="ppc-layer-label">{l.label}</span>
+                      <span className="ppc-small">{l.sub(releaseFromLabel)}</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="ppc-switch"
+                      role="switch"
+                      aria-checked={layers[l.key]}
+                      aria-label={l.label}
+                      onClick={() => onLayersChange({ ...layers, [l.key]: !layers[l.key] })}
+                    />
+                  </label>
+                ))}
+              </div>
 
-          <div className="ppc-sec">
-            <div className="ppc-row ppc-row--base">
-              <span className="ppc-eyebrow">Marker sensitivity</span>
-              <span className="ppc-sens-input">
+              <div className="ppc-sec">
+                <div className="ppc-row ppc-row--base">
+                  <span className="ppc-eyebrow">Marker sensitivity</span>
+                  <span className="ppc-sens-input">
+                    <input
+                      type="number"
+                      min={0}
+                      max={150}
+                      step={1}
+                      value={sens}
+                      aria-label="Marker sensitivity percent"
+                      onChange={(e) => onSensChange(clampSens(e.target.value))}
+                    />
+                    %
+                  </span>
+                </div>
+                <span className="ppc-note">Only mark days that rise or fall at least {sens}% from the days around them.</span>
                 <input
-                  type="number"
+                  className="ppc-range"
+                  type="range"
                   min={0}
                   max={150}
                   step={1}
                   value={sens}
-                  aria-label="Marker sensitivity percent"
+                  aria-label="Marker sensitivity"
                   onChange={(e) => onSensChange(clampSens(e.target.value))}
                 />
-                %
-              </span>
-            </div>
-            <span className="ppc-note">Only mark days that rise or fall at least {sens}% from the days around them.</span>
-            <input
-              className="ppc-range"
-              type="range"
-              min={0}
-              max={150}
-              step={1}
-              value={sens}
-              aria-label="Marker sensitivity"
-              onChange={(e) => onSensChange(clampSens(e.target.value))}
-            />
-            <div className="ppc-scale">
-              <span>More markers</span>
-              <span>{plural(markerCount, "marker")} in view</span>
-              <span>Fewer markers</span>
-            </div>
-          </div>
+                <div className="ppc-scale">
+                  <span>More markers</span>
+                  <span>{plural(markerCount, "marker")} in view</span>
+                  <span>Fewer markers</span>
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="ppc-sec">
             <div className="ppc-row">

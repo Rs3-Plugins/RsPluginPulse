@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import type { GameUpdate, PluginRelease, PluginTrendPoint, SpecialEvent } from "../api";
+import { getPluginTrend, type GameUpdate, type PluginRelease, type PluginTrendPoint, type SpecialEvent } from "../api";
 import type { Game } from "../context/GameContext";
 import {
   annotate,
@@ -19,7 +19,11 @@ import { CustomRangeCalendar } from "./CustomRangeCalendar";
 
 export type TrendMetric = "downloadsTotal" | "downloadsToday" | "subscribersTotal";
 export type ChartType = "line" | "bar";
-export type RangeKey = "7" | "30" | "all" | "custom";
+// "today"/"24h" are a different beast from the rest -- see the
+// RecentChart branch in the main render below -- a short, un-annotated
+// window over raw ingest-cadence snapshots instead of the usual
+// one-point-per-day series.
+export type RangeKey = "today" | "24h" | "7" | "30" | "all" | "custom";
 
 interface LinkChoice {
   kind: "event" | "update" | "release" | "relupdate";
@@ -29,15 +33,16 @@ interface LinkChoice {
 }
 
 // RuneLite has no separate "downloads"/"subscribers" concepts -- both
-// fields hold the same live install-count gauge, so everything there is
-// just labelled "installs" instead.
+// fields hold the same live install-count gauge, so subscribersTotal is
+// just a duplicate of downloadsTotal there and isn't offered as its own
+// chartable tile (see PluginTrend.tsx's "Change today"/"Installs monthly"
+// static tiles for the derived numbers shown instead). It also has no
+// daily figure upstream (downloadsToday is always 0, see runelite.ts), so
+// that metric is left out entirely rather than offered as a selectable
+// tab that only ever shows a flat zero line.
 export function trendMetrics(game: Game): { key: TrendMetric; label: string; unit: string }[] {
   if (game === "runelite") {
-    return [
-      { key: "downloadsTotal", label: "Total installs", unit: "installs" },
-      { key: "downloadsToday", label: "Installs today", unit: "installs" },
-      { key: "subscribersTotal", label: "Installs", unit: "installs" },
-    ];
+    return [{ key: "downloadsTotal", label: "Total installs", unit: "installs" }];
   }
   return [
     { key: "downloadsTotal", label: "Total downloads", unit: "downloads" },
@@ -48,6 +53,8 @@ export function trendMetrics(game: Game): { key: TrendMetric; label: string; uni
 
 interface Props {
   points: PluginTrendPoint[]; // full history, one point per day -- TrendChart owns all windowing/zoom itself
+  pluginId: number; // for the Today/24h buttons' own fetch of raw recent snapshots
+  game: Game;
   metric: TrendMetric; // which series is plotted/displayed
   // Which series "notability" (the move score behind every marker type) is
   // computed from -- deliberately separate from `metric` above. For RS3/
@@ -146,14 +153,56 @@ function readBoolParam(params: URLSearchParams, key: string): boolean {
   return params.get(key) !== "0";
 }
 
-export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, pluginName, initialParams, onParamsChange, gameUpdates, specialEvents, releases }: Props) {
+export function TrendChart({
+  points,
+  pluginId,
+  game,
+  metric,
+  scoreMetric,
+  metricLabel,
+  unit,
+  pluginName,
+  initialParams,
+  onParamsChange,
+  gameUpdates,
+  specialEvents,
+  releases,
+}: Props) {
   // ---------- State (read once from the URL on mount, same as the design handoff) ----------
   const initial = useRef(initialParams).current;
   const [chartType, setChartType] = useState<ChartType>(initial.get("chart") === "bar" ? "bar" : "line");
   const [range, setRange] = useState<RangeKey>(() => {
     const r = initial.get("range");
-    return r === "7" || r === "30" || r === "all" || r === "custom" ? r : "30";
+    return r === "today" || r === "24h" || r === "7" || r === "30" || r === "all" || r === "custom" ? r : "30";
   });
+
+  // ---------- Today/24h: raw recent snapshots, fetched on demand ----------
+  // Deliberately NOT folded into the day-indexed `points`/`win` machinery
+  // below -- zoom, annotations, milestones and CSV export all assume one
+  // point per calendar day, which a handful of hours of raw ingest-cadence
+  // snapshots doesn't satisfy. See recentPoints' own render branch further
+  // down instead.
+  const [recentPoints, setRecentPoints] = useState<PluginTrendPoint[] | null>(null);
+  const [recentLoading, setRecentLoading] = useState(false);
+  useEffect(() => {
+    if (range !== "today" && range !== "24h") return;
+    let cancelled = false;
+    setRecentLoading(true);
+    getPluginTrend(pluginId, game, range)
+      .then((res) => {
+        if (!cancelled) setRecentPoints(res.trend);
+      })
+      .catch(() => {
+        if (!cancelled) setRecentPoints([]);
+      })
+      .finally(() => {
+        if (!cancelled) setRecentLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range, pluginId, game]);
+  const isRecent = range === "today" || range === "24h";
   const [zoom, setZoomState] = useState<Win | null>(() => {
     const from = initial.get("from"),
       to = initial.get("to");
@@ -189,7 +238,12 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
   // instead of silently picking by priority -- see hoveredLinks below.
   const [linkChoice, setLinkChoice] = useState<LinkChoice[] | null>(null);
 
-  const plotRef = useRef<HTMLDivElement>(null);
+  // A callback ref, not useRef -- this div unmounts/remounts whenever
+  // range flips into/out of Today/24h (see the isRecent branch below), so
+  // a useRef + mount-only effect would only ever see the very first
+  // instance and go stale (or silently stop firing at all) after that.
+  // See RecentPlot's own plotEl further down for the same fix.
+  const [plotEl, setPlotEl] = useState<HTMLDivElement | null>(null);
   const rangeAnchorRef = useRef<HTMLDivElement>(null);
   const settingsAnchorRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLElement>(null);
@@ -253,15 +307,14 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
 
   // ---------- Resize ----------
   useEffect(() => {
-    const el = plotRef.current;
-    if (!el || !window.ResizeObserver) return;
+    if (!plotEl || !window.ResizeObserver) return;
     const ro = new ResizeObserver(() => {
-      const w = el.clientWidth;
+      const w = plotEl.clientWidth;
       if (w) setWidth(w);
     });
-    ro.observe(el);
+    ro.observe(plotEl);
     return () => ro.disconnect();
-  }, []);
+  }, [plotEl]);
 
   // ---------- Popovers: outside click / Escape ----------
   useEffect(() => {
@@ -292,7 +345,7 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
   const geomRef = useRef<{ a: number; b: number; n: number; ml: number; pw: number } | null>(null);
   const activeLinksRef = useRef<LinkChoice[]>([]);
   useEffect(() => {
-    const el = plotRef.current;
+    const el = plotEl;
     if (!el) return;
 
     let drag: { x: number; a: number; w: number; n: number; pw: number; moved: boolean; shift: boolean; si: number; mode: "pan" | "sel" | null } | null = null;
@@ -392,7 +445,7 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
       el.removeEventListener("wheel", onWheel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastIndex]);
+  }, [plotEl, lastIndex]);
 
   // ---------- Layout ----------
   const mobile = width < 640;
@@ -590,12 +643,29 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
         <div className="ppc-heading">
           <span className="ppc-title">{metricLabel}</span>
           <span className="ppc-sub">
-            {dRange(points, lo, hi)} · {plural(n, "day")}
+            {isRecent ? (range === "today" ? "Today so far" : "Last 24 hours") : `${dRange(points, lo, hi)} · ${plural(n, "day")}`}
           </span>
         </div>
         <div className="ppc-controls">
           <div className="ppc-anchor" ref={rangeAnchorRef}>
             <div className="ppc-seg" role="radiogroup" aria-label="Range">
+              {(["today", "24h"] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  role="radio"
+                  aria-checked={range === k}
+                  onClick={() => {
+                    setRange(k);
+                    setZoomState(null);
+                    setHover(null);
+                    setCalOpen(false);
+                    setSel(null);
+                  }}
+                >
+                  {k === "today" ? "Today" : "24h"}
+                </button>
+              ))}
               {(["7", "30", "all"] as const).map((k) => (
                 <button
                   key={k}
@@ -641,8 +711,8 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
               type="button"
               className="ppc-icon"
               aria-label="Zoom out"
-              title="Zoom out"
-              disabled={hi - lo >= lastIndex}
+              title={isRecent ? "Not available for Today/24h" : "Zoom out"}
+              disabled={isRecent || hi - lo >= lastIndex}
               onClick={() => {
                 zoomBy(1 / 0.6);
                 setSel(null);
@@ -654,8 +724,8 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
               type="button"
               className="ppc-icon"
               aria-label="Zoom in"
-              title="Zoom in"
-              disabled={hi - lo <= MINW}
+              title={isRecent ? "Not available for Today/24h" : "Zoom in"}
+              disabled={isRecent || hi - lo <= MINW}
               onClick={() => {
                 zoomBy(0.6);
                 setSel(null);
@@ -663,7 +733,14 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
             >
               <ZoomInIcon />
             </button>
-            <button type="button" className="ppc-reset" aria-label="Reset zoom" disabled={!zoom} onClick={resetZoom}>
+            <button
+              type="button"
+              className="ppc-reset"
+              aria-label="Reset zoom"
+              title={isRecent ? "Not available for Today/24h" : undefined}
+              disabled={isRecent || !zoom}
+              onClick={resetZoom}
+            >
               Reset
             </button>
           </div>
@@ -671,6 +748,7 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
           <div className="ppc-anchor" ref={settingsAnchorRef}>
             <ChartSettingsMenu
               open={settingsOpen}
+              annotationsDisabled={isRecent}
               onToggle={() => {
                 setSettingsOpen((o) => !o);
                 setCalOpen(false);
@@ -683,15 +761,19 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
               sens={sens}
               onSensChange={setSens}
               markerCount={markerCount}
-              onExport={(kind) => exportTrend(points, win, ann, pluginName, kind)}
+              onExport={(kind) => (isRecent ? exportRecentTrend(recentPoints ?? [], pluginName, kind) : exportTrend(points, win, ann, pluginName, kind))}
             />
           </div>
         </div>
       </header>
 
+      {isRecent ? (
+        <RecentPlot points={recentPoints} loading={recentLoading} metric={metric} unit={unit} metricLabel={metricLabel} range={range} chartType={chartType} />
+      ) : (
+        <>
       <div className="ppc-plotwrap">
         <div
-          ref={plotRef}
+          ref={setPlotEl}
           className={`ppc-plot ${hoveredLinks.length > 0 && !dragMode ? "is-link" : ""} ${dragMode === "pan" ? "is-panning" : ""}`}
           style={{ height: H }}
         >
@@ -908,7 +990,222 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
           </div>
         </div>
       )}
+        </>
+      )}
     </section>
+  );
+}
+
+// ---------- RecentPlot (Today/24h) ----------
+// A deliberately simpler, un-annotated view over raw ingest-cadence
+// snapshots -- see the Today/24h fetch effect above for why this doesn't
+// reuse the day-indexed zoom/annotation machinery below.
+function RecentPlot({
+  points,
+  loading,
+  metric,
+  unit,
+  metricLabel,
+  range,
+  chartType,
+}: {
+  points: PluginTrendPoint[] | null;
+  loading: boolean;
+  metric: TrendMetric;
+  unit: string;
+  metricLabel: string;
+  range: RangeKey;
+  chartType: ChartType;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  // Real measured pixel width, same approach as the main chart above --
+  // the axis-label divs below are plain positioned HTML, not SVG content,
+  // so they need real pixel coordinates rather than relying on the SVG's
+  // own viewBox scaling to "stretch" a fixed-width design.
+  //
+  // A callback ref, not useRef + a mount-only effect: unlike the main
+  // chart (which only ever mounts once its data is already loaded), this
+  // component mounts immediately in the "Loading…" state below -- the
+  // plot div with the real width doesn't exist in the DOM yet at that
+  // point, so a `useEffect(..., [])` reading a plain ref would find
+  // `.current` still null and never attach the observer. The callback
+  // fires again once the real div replaces the loading placeholder.
+  const [plotEl, setPlotEl] = useState<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState(900);
+  useEffect(() => {
+    if (!plotEl || !window.ResizeObserver) return;
+    const ro = new ResizeObserver(() => {
+      const w = plotEl.clientWidth;
+      if (w) setWidth(w);
+    });
+    ro.observe(plotEl);
+    return () => ro.disconnect();
+  }, [plotEl]);
+
+  if (loading || points === null) {
+    return (
+      <div className="ppc-plotwrap">
+        <div className="empty-state">
+          <img src="/logo/icon-2a-hex.svg" alt="" />
+          <div className="empty-title">Loading…</div>
+        </div>
+      </div>
+    );
+  }
+  if (points.length === 0) {
+    return (
+      <div className="ppc-plotwrap">
+        <div className="empty-state">
+          <img src="/logo/icon-2a-hex.svg" alt="" />
+          <div className="empty-title">No snapshots yet</div>
+          <p style={{ margin: 0 }}>{range === "today" ? "Check back after the next ingest run." : "No snapshots in the last 24 hours."}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const W = Math.max(300, width),
+    H = 220,
+    ml = 56,
+    mr = 12,
+    mt = 12,
+    mb = 10;
+  const pw = W - ml - mr,
+    ph = H - mt - mb;
+  const bar = chartType === "bar";
+  const times = points.map((p) => new Date(p.capturedAt).getTime());
+  const values = points.map((p) => p[metric]);
+  const t0 = times[0],
+    t1 = times[times.length - 1];
+  const tSpan = Math.max(1, t1 - t0);
+  // Bars read dishonestly off a padded, non-zero baseline (a small real
+  // change looks huge), so they always start at 0 -- same convention as
+  // the main chart's bar/flow-metric mode. The line/area view keeps the
+  // tight, padded range so small moves are still visible.
+  let vLo = bar ? 0 : Math.min(...values),
+    vHi = Math.max(...values);
+  if (vLo === vHi) {
+    vLo -= 1;
+    vHi += 1;
+  }
+  const vPad = (vHi - vLo) * 0.08;
+  if (!bar) vLo -= vPad;
+  vHi += vPad;
+
+  const X = (t: number) => ml + ((t - t0) / tSpan) * pw;
+  const Y = (v: number) => mt + ph - ((v - vLo) / (vHi - vLo)) * ph;
+  const base = mt + ph;
+
+  const linePath = points.map((_, i) => `${i === 0 ? "M" : "L"}${X(times[i]).toFixed(1)},${Y(values[i]).toFixed(1)}`).join("");
+  const areaPath = `M${X(t0).toFixed(1)},${base.toFixed(1)}L${points
+    .map((_, i) => `${X(times[i]).toFixed(1)},${Y(values[i]).toFixed(1)}`)
+    .join("L")}L${X(t1).toFixed(1)},${base.toFixed(1)}Z`;
+  const barWidth = Math.max(2, Math.min(28, (pw / points.length) * 0.6));
+
+  function nearestIndex(clientX: number): number {
+    const svg = svgRef.current;
+    if (!svg) return 0;
+    const rect = svg.getBoundingClientRect();
+    const t = t0 + ((clientX - rect.left) / rect.width) * tSpan;
+    let best = 0,
+      bestDiff = Infinity;
+    for (let i = 0; i < times.length; i++) {
+      const diff = Math.abs(times[i] - t);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  const tickCount = 4;
+  const ticks = Array.from({ length: tickCount }, (_, i) => vLo + ((vHi - vLo) * i) / (tickCount - 1));
+  const timeTickCount = Math.min(points.length, 5);
+  const timeTicks = Array.from({ length: timeTickCount }, (_, i) => t0 + ((t1 - t0) * i) / (timeTickCount - 1));
+
+  return (
+    <div className="ppc-plotwrap">
+      <div className="ppc-plot" ref={setPlotEl} style={{ height: H }}>
+        <svg
+          ref={svgRef}
+          width={W}
+          height={H}
+          viewBox={`0 0 ${W} ${H}`}
+          role="img"
+          aria-label={`${metricLabel} over ${range === "today" ? "today so far" : "the last 24 hours"}`}
+          onMouseMove={(e) => setHover(nearestIndex(e.clientX))}
+          onMouseLeave={() => setHover(null)}
+        >
+          <defs>
+            <linearGradient id="ppcRecentArea" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="var(--gold)" stopOpacity={0.22} />
+              <stop offset="1" stopColor="var(--gold)" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          {ticks.map((v) => (
+            <line key={v} className="ppc-s-grid" x1={ml} x2={ml + pw} y1={Y(v)} y2={Y(v)} />
+          ))}
+          {bar ? (
+            points.map((_, i) => (
+              <rect
+                key={i}
+                className={`ppc-s-bar${hover === i ? " is-hot" : hover === null ? "" : " is-dim"}`}
+                x={X(times[i]) - barWidth / 2}
+                y={Y(values[i])}
+                width={barWidth}
+                height={Math.max(0, base - Y(values[i]))}
+                rx={1}
+              />
+            ))
+          ) : (
+            <>
+              <path d={areaPath} fill="url(#ppcRecentArea)" />
+              <path className="ppc-s-line" d={linePath} />
+            </>
+          )}
+          <line className="ppc-s-base" x1={ml} x2={ml + pw} y1={base} y2={base} />
+          {hover !== null && (
+            <>
+              {!bar && <line className="ppc-s-cross" x1={X(times[hover])} x2={X(times[hover])} y1={mt} y2={mt + ph} />}
+              {!bar && <circle className="ppc-s-dot" cx={X(times[hover])} cy={Y(values[hover])} r={4.5} />}
+            </>
+          )}
+        </svg>
+        {ticks.map((v) => (
+          <div key={v} className="ppc-axis ppc-axis--y" style={{ top: Y(v) - 8, width: ml - 8 }}>
+            {short(v)}
+          </div>
+        ))}
+        {timeTicks.map((t, i) => (
+          <div
+            key={t}
+            className="ppc-axis"
+            style={{ left: X(t), top: mt + ph + 6, transform: i === timeTickCount - 1 ? "translateX(-100%)" : i === 0 ? "translateX(0)" : "translateX(-50%)" }}
+          >
+            {new Date(t).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+          </div>
+        ))}
+        {hover !== null && (
+          <div
+            className="ppc-tip"
+            role="tooltip"
+            style={{ left: X(times[hover]), top: mt, width: 200, transform: X(times[hover]) > W - 212 ? "translate(calc(-100% - 14px),0)" : "translate(14px,0)" }}
+          >
+            <div className="ppc-tip-main">
+              <div className="ppc-tip-date">
+                {new Date(points[hover].capturedAt).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}
+              </div>
+              <div className="ppc-tip-val">
+                <strong>{fmt(values[hover])}</strong>
+                <span>{unit}</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1287,6 +1584,36 @@ function exportTrend(points: PluginTrendPoint[], win: Win, ann: (i: number) => A
   const link = document.createElement("a");
   link.href = url;
   link.download = `${slug}-trend-${rows[0]?.date ?? ""}_${rows[rows.length - 1]?.date ?? ""}.${kind}`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Today/24h's own export -- raw ingest-cadence snapshots, no annotations
+// (there's nothing day-indexed to attach them to), full timestamp instead
+// of just a date since multiple points can land on the same day.
+function exportRecentTrend(points: PluginTrendPoint[], pluginName: string, kind: "csv" | "json") {
+  const rows = points.map((p) => ({
+    captured_at: p.capturedAt,
+    downloads_total: p.downloadsTotal,
+    downloads_today: p.downloadsToday,
+    subscribers_total: p.subscribersTotal,
+  }));
+  const text =
+    kind === "csv"
+      ? [
+          "captured_at,downloads_total,downloads_today,subscribers_total",
+          ...rows.map((r) => [r.captured_at, r.downloads_total, r.downloads_today, r.subscribers_total].join(",")),
+        ].join("\n")
+      : JSON.stringify(rows, null, 2);
+  const slug = pluginName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+  const blob = new Blob([text], { type: kind === "csv" ? "text/csv" : "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${slug}-recent-${rows[0]?.captured_at.slice(0, 16).replace(/[:T]/g, "-") ?? ""}.${kind}`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
