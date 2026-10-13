@@ -220,3 +220,36 @@ CREATE TABLE IF NOT EXISTS special_events (
 ALTER TABLE special_events ADD COLUMN IF NOT EXISTS url TEXT;
 
 CREATE INDEX IF NOT EXISTS special_events_game_idx ON special_events (game, start_date);
+
+-- Per-plugin release/version history, backfilled once from each game's real
+-- upstream source (see packages/ingest/src/backfill-releases.ts) rather than
+-- only observed forward-in-time like plugin_snapshots.date_updated:
+--   - runescape (mod.io): each mod's /files entries (one per uploaded build).
+--   - runelite (plugin-hub): each commit touching plugins/<name> in the
+--     runelite/plugin-hub GitHub repo (one per hub re-packaging).
+-- source_key is the upstream id for that one release (mod.io file id, or
+-- the hub commit sha) so re-running the backfill is a no-op on rows it's
+-- already seen, and a later recurring job can safely pick up only new ones.
+CREATE TABLE IF NOT EXISTS plugin_releases (
+  id SERIAL PRIMARY KEY,
+  plugin_id INTEGER NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+  source TEXT NOT NULL,
+  source_key TEXT NOT NULL,
+  released_at TIMESTAMPTZ NOT NULL,
+  version TEXT,
+  changelog TEXT,
+  url TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (plugin_id, source, source_key)
+);
+
+-- The plugin-hub bot has non-content commits ("disable X"/"unavailable X")
+-- that pull a broken plugin from the hub listing, not a real version update
+-- -- still worth recording (so "unavailable -> available again" is
+-- reconstructable later) but not something a trend chart should show as a
+-- Release/Update marker. mod.io releases are always 'update' -- every
+-- uploaded file there is a real version. See packages/ingest/src/
+-- pluginHubReleases.ts for how 'unavailable' gets classified.
+ALTER TABLE plugin_releases ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'update';
+
+CREATE INDEX IF NOT EXISTS plugin_releases_plugin_idx ON plugin_releases (plugin_id, released_at);

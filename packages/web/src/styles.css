@@ -2530,6 +2530,10 @@ h1 {
   border-radius: 1.5px;
   background: var(--rel);
 }
+.ppc-dot--relupdate {
+  border-radius: 0;
+  border: 1.2px dashed var(--rel);
+}
 .ppc-dot--ms {
   width: 5px;
   height: 5px;
@@ -2717,6 +2721,10 @@ h1 {
   fill: var(--rel);
   opacity: 0.4;
 }
+.ppc-lanefill--relupdate {
+  fill: var(--rel);
+  opacity: 0.18;
+}
 .ppc-s-cross {
   stroke: var(--goldHi);
   stroke-dasharray: 3 3;
@@ -2750,6 +2758,12 @@ h1 {
 .ppc-m-rel {
   fill: var(--rel);
 }
+.ppc-m-relupdate {
+  fill: var(--bg);
+  stroke: var(--rel);
+  stroke-width: 1.6;
+  stroke-dasharray: 2.2 1.8;
+}
 
 /* ---------- Compare chart (DailyChart, interactive mode) ---------- */
 .ppc-s-releaseline {
@@ -2757,6 +2771,12 @@ h1 {
   stroke-width: 1;
   stroke-dasharray: 3 3;
   opacity: 0.55;
+}
+.ppc-s-relupdateline {
+  stroke: var(--rel);
+  stroke-width: 1;
+  stroke-dasharray: 1.5 2;
+  opacity: 0.4;
 }
 .daily-zoom-preview {
   fill: var(--gold);
@@ -2882,6 +2902,17 @@ h1 {
   background: rgba(185, 163, 227, 0.14);
   border-color: rgba(185, 163, 227, 0.4);
 }
+/* Same family as .ppc-chip--release (both are about a plugin's own release
+   history) but dashed, same way .ppc-chip--possible once related to
+   .ppc-chip--update -- a lighter variant of the same color, not a
+   different color, since reusing --up/green here would collide with the
+   unrelated "notable move near a game update" Update concept. */
+.ppc-chip--relupdate {
+  color: var(--rel);
+  background: transparent;
+  border-color: rgba(185, 163, 227, 0.7);
+  border-style: dashed;
+}
 .ppc-chip--milestone {
   color: var(--goldHi);
   background: rgba(202, 164, 77, 0.14);
@@ -2975,6 +3006,45 @@ h1 {
 }
 .ppc-key-item--warn .ppc-key-desc {
   color: var(--down);
+}
+
+/* Link-choice modal -- shown when a day has more than one clickable link
+   (e.g. an Update block and a Release block both landing on the same day). */
+.ppc-modal {
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ppc-modal-links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ppc-modal-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  background: var(--raise);
+  text-decoration: none;
+  color: var(--text);
+  transition: border-color 0.15s;
+}
+.ppc-modal-link:hover {
+  border-color: var(--gold);
+}
+.ppc-modal-link-title {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ppc-modal .ppc-btn-secondary {
+  align-self: flex-end;
 }
 
 .desc-row {

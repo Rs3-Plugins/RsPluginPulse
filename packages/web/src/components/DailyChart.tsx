@@ -34,10 +34,14 @@ interface Props {
   interactive?: boolean;
   events?: ResolvedEvent[];
   showEvents?: boolean;
-  // Day indices where any compared item had its own dateUpdated change --
-  // unlike events/game-updates this isn't tied to a single named thing, so
-  // it's just raw day indices rather than ResolvedUpdate-shaped objects.
+  // Day indices where any compared item had a release -- split the same way
+  // the single-plugin trend chart tags them: releaseDays is each item's
+  // very first recorded release ("Release"), updateDays is every one after
+  // that ("Update"). Plain day indices rather than ResolvedRelease-shaped
+  // objects since this isn't tied to a single named thing (multiple
+  // compared items can each release on the same day).
   releaseDays?: number[];
+  updateDays?: number[];
   showReleases?: boolean;
   // Zoom is controlled by the parent (matching TrendChart, whose zoom buttons live in its
   // own header row, not floating over the plot) -- required whenever interactive is true.
@@ -57,6 +61,7 @@ export function DailyChart({
   events = [],
   showEvents = true,
   releaseDays = [],
+  updateDays = [],
   showReleases = true,
   zoom = null,
   onZoomChange,
@@ -86,8 +91,10 @@ export function DailyChart({
   const W = interactive ? Math.max(300, measuredWidth) : WIDTH;
   const { a: lo, b: hi } = zoom ?? { a: 0, b: lastAll };
   const n = hi - lo + 1;
-  const hasLane = interactive && ((showEvents && events.length > 0) || (showReleases && releaseDays.length > 0));
+  const hasLane =
+    interactive && ((showEvents && events.length > 0) || (showReleases && (releaseDays.length > 0 || updateDays.length > 0)));
   const releaseDaySet = useMemo(() => new Set(releaseDays), [releaseDays]);
+  const updateDaySet = useMemo(() => new Set(updateDays), [updateDays]);
   const LANE_GAP = 6; // gap between the plot baseline and the lane, matching TrendChart
   const laneExtra = hasLane ? LANE_H + LANE_GAP : 0;
   const plotWidth = W - PADDING.left - PADDING.right;
@@ -110,13 +117,16 @@ export function DailyChart({
   const xTickIndices = useMemo(() => pickTickIndices(dates, lo, hi, X_TICK_COUNT), [dates, lo, hi]);
   const barWidth = bars ? Math.max(1, (plotWidth / Math.max(n, 1)) * (n > 120 ? 0.75 : 0.62)) : 0;
 
-  // ---------- Timeline lane classification (Event > Plugin update; no per-series
-  // notability -- these are plain calendar facts shared across every compared item) ----------
-  const laneSegs = useMemo(() => {
+  // ---------- Timeline lane fill: Event and Release/Update are two independent
+  // layers, not one mutually-exclusive classification -- a release that happens to
+  // land inside an ongoing event's date range still gets its own tint painted on top
+  // (with transparency), rather than the event silently hiding it. No per-series
+  // notability here -- these are plain calendar facts shared across every compared item. ----------
+  const eventFillSegs = useMemo(() => {
     if (!hasLane) return [];
     const dayHalf = n > 1 ? plotWidth / (n - 1) / 2 : plotWidth / 2;
-    const segs: { x1: number; x2: number; cls: "ev" | "rel" }[] = [];
-    let curCls: "ev" | "rel" | null = null;
+    const segs: { x1: number; x2: number; cls: "ev" }[] = [];
+    let curCls: "ev" | null = null;
     let curStart = lo;
     const push = (endIndex: number) => {
       if (!curCls) return;
@@ -125,9 +135,7 @@ export function DailyChart({
       if (x2 > x1) segs.push({ x1, x2, cls: curCls });
     };
     for (let i = lo; i <= hi; i++) {
-      const isEvent = showEvents && events.some((e) => i >= e.a && i <= e.b);
-      const isRelease = !isEvent && showReleases && releaseDaySet.has(i);
-      const cls: "ev" | "rel" | null = isEvent ? "ev" : isRelease ? "rel" : null;
+      const cls: "ev" | null = showEvents && events.some((e) => i >= e.a && i <= e.b) ? "ev" : null;
       if (cls !== curCls) {
         push(i - 1);
         curCls = cls;
@@ -136,12 +144,42 @@ export function DailyChart({
     }
     push(hi);
     return segs;
-  }, [hasLane, lo, hi, n, plotWidth, xForIndex, events, releaseDaySet, showEvents, showReleases]);
+  }, [hasLane, lo, hi, n, plotWidth, xForIndex, events, showEvents]);
+
+  const releaseFillSegs = useMemo(() => {
+    if (!hasLane) return [];
+    const dayHalf = n > 1 ? plotWidth / (n - 1) / 2 : plotWidth / 2;
+    const segs: { x1: number; x2: number; cls: "rel" | "relupdate" }[] = [];
+    let curCls: "rel" | "relupdate" | null = null;
+    let curStart = lo;
+    const push = (endIndex: number) => {
+      if (!curCls) return;
+      const x1 = Math.max(0, xForIndex(curStart) - dayHalf);
+      const x2 = Math.min(plotWidth, xForIndex(endIndex) + dayHalf);
+      if (x2 > x1) segs.push({ x1, x2, cls: curCls });
+    };
+    for (let i = lo; i <= hi; i++) {
+      const isRelease = showReleases && releaseDaySet.has(i);
+      const isUpdate = !isRelease && showReleases && updateDaySet.has(i);
+      const cls: "rel" | "relupdate" | null = isRelease ? "rel" : isUpdate ? "relupdate" : null;
+      if (cls !== curCls) {
+        push(i - 1);
+        curCls = cls;
+        curStart = i;
+      }
+    }
+    push(hi);
+    return segs;
+  }, [hasLane, lo, hi, n, plotWidth, xForIndex, releaseDaySet, updateDaySet, showReleases]);
 
   const visibleEvents = useMemo(() => (showEvents ? events.filter((e) => e.b >= lo && e.a <= hi) : []), [events, showEvents, lo, hi]);
   const visibleReleaseDays = useMemo(
     () => (showReleases ? releaseDays.filter((d) => d >= lo && d <= hi) : []),
     [releaseDays, showReleases, lo, hi],
+  );
+  const visibleUpdateDays = useMemo(
+    () => (showReleases ? updateDays.filter((d) => d >= lo && d <= hi) : []),
+    [updateDays, showReleases, lo, hi],
   );
 
   function setWin(a: number, w: number) {
@@ -291,6 +329,9 @@ export function DailyChart({
           {visibleReleaseDays.map((d, k) => (
             <line key={`rel-${k}`} className="ppc-s-releaseline" x1={xForIndex(d)} x2={xForIndex(d)} y1={0} y2={plotHeight} />
           ))}
+          {visibleUpdateDays.map((d, k) => (
+            <line key={`upd-${k}`} className="ppc-s-relupdateline" x1={xForIndex(d)} x2={xForIndex(d)} y1={0} y2={plotHeight} />
+          ))}
 
           {yTicks.map((tick) => (
             <g key={tick}>
@@ -371,8 +412,11 @@ export function DailyChart({
           {hasLane && (
             <>
               <rect className="ppc-s-lane" x={0} y={plotHeight + laneExtra - LANE_H} width={plotWidth} height={LANE_H} rx={3} />
-              {laneSegs.map((s, k) => (
-                <rect key={k} className={`ppc-lanefill ppc-lanefill--${s.cls}`} x={s.x1} y={plotHeight + laneExtra - LANE_H} width={s.x2 - s.x1} height={LANE_H} />
+              {eventFillSegs.map((s, k) => (
+                <rect key={`ef-${k}`} className={`ppc-lanefill ppc-lanefill--${s.cls}`} x={s.x1} y={plotHeight + laneExtra - LANE_H} width={s.x2 - s.x1} height={LANE_H} />
+              ))}
+              {releaseFillSegs.map((s, k) => (
+                <rect key={`rf-${k}`} className={`ppc-lanefill ppc-lanefill--${s.cls}`} x={s.x1} y={plotHeight + laneExtra - LANE_H} width={s.x2 - s.x1} height={LANE_H} />
               ))}
             </>
           )}

@@ -1,6 +1,6 @@
 import { useMemo, useState, type RefObject } from "react";
 import type { PluginTrendPoint } from "../api";
-import { annotate, type AnnotationLayers, type ResolvedEvent, type ResolvedUpdate } from "../lib/trendAnnotations";
+import { annotate, type AnnotationLayers, type ResolvedEvent, type ResolvedRelease, type ResolvedUpdate } from "../lib/trendAnnotations";
 import type { TrendMetric } from "./TrendChart";
 
 const FMO = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -14,7 +14,7 @@ interface Props {
   events: ResolvedEvent[];
   updates: ResolvedUpdate[];
   notable: boolean[];
-  releaseSet: Set<number>;
+  releaseMap: Map<number, ResolvedRelease>;
   milestoneMap: Map<number, number>;
   layers: AnnotationLayers;
   currentRange: { a: number; b: number } | null;
@@ -48,7 +48,7 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
-export function CustomRangeCalendar({ points, metric, events, updates, notable, releaseSet, milestoneMap, layers, currentRange, anchorRef, onApply, onCancel }: Props) {
+export function CustomRangeCalendar({ points, metric, events, updates, notable, releaseMap, milestoneMap, layers, currentRange, anchorRef, onApply, onCancel }: Props) {
   const lastIndex = points.length - 1;
 
   const months = useMemo((): Month[] => {
@@ -101,7 +101,7 @@ export function CustomRangeCalendar({ points, metric, events, updates, notable, 
   const pb = calB ?? (pa != null && calHover != null && calHover > pa ? calHover : null);
 
   function ann(i: number) {
-    return annotate(i, events, updates, notable, releaseSet, milestoneMap, layers);
+    return annotate(i, events, updates, notable, releaseMap, milestoneMap, layers);
   }
 
   function dots(i: number) {
@@ -109,7 +109,7 @@ export function CustomRangeCalendar({ points, metric, events, updates, notable, 
     const out: string[] = [];
     if (a.prim?.cat === "event" && a.prim.bound) out.push("ev");
     if (a.prim?.cat === "update") out.push("up");
-    if (a.release) out.push("rel");
+    if (a.release) out.push(a.release.isInitial ? "rel" : "relupdate");
     if (a.milestone !== undefined) out.push("ms");
     return out;
   }
@@ -148,8 +148,16 @@ export function CustomRangeCalendar({ points, metric, events, updates, notable, 
       const suffix = a.prim.bound === "start" ? " (began)" : a.prim.bound === "end" ? " (ended)" : a.prim.bound === "ongoing" ? " (ongoing)" : "";
       infoItems.push({ dot: "band", label: "Event", color: "var(--evText)", text: a.prim.event.title + suffix });
     }
-    if (a.prim?.cat === "update" && a.prim.update) infoItems.push({ dot: "up", label: "Update", color: "var(--up)", text: a.prim.update.title });
-    if (a.release) infoItems.push({ dot: "rel", label: "Release", color: "var(--rel)", text: "Plugin updated" });
+    if (a.prim?.cat === "update" && a.prim.update) infoItems.push({ dot: "up", label: "Game Update", color: "var(--up)", text: a.prim.update.title });
+    if (a.release) {
+      const isInitial = a.release.isInitial;
+      infoItems.push({
+        dot: isInitial ? "rel" : "relupdate",
+        label: "Plugin Update",
+        color: "var(--rel)",
+        text: a.release.version ? `v${a.release.version}` : isInitial ? "Plugin released" : "Plugin updated",
+      });
+    }
     if (a.milestone !== undefined) infoItems.push({ dot: "ms", label: "Milestone", color: "var(--goldHi)", text: `Passed ${fmt(a.milestone)}` });
   }
 

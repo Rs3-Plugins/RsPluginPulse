@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import {
   getCategoryStatsPage,
   getCompareData,
+  getPluginReleasesBatch,
   getSpecialEvents,
   getStatsOverview,
   getTopAuthors,
@@ -17,11 +18,12 @@ import {
   type CompareResult,
   type CompareType,
   type PluginLeaderboardRow,
+  type PluginRelease,
   type SpecialEvent,
   type StatsOverview,
 } from "../api";
 import { DailyChart, formatTooltipDate, type Win } from "../components/DailyChart";
-import { resolveEvents } from "../lib/trendAnnotations";
+import { resolveEvents, resolveReleases, type ResolvedRelease } from "../lib/trendAnnotations";
 import { Pagination } from "../components/Pagination";
 import { useGame, type Game } from "../context/GameContext";
 import { authorHref, pluginHref } from "../lib/links";
@@ -203,6 +205,25 @@ export function SiteStats() {
       cancelled = true;
     };
   }, [game, compareResult?.from, compareResult?.to]);
+
+  // Real backfilled release history (see packages/ingest/src/backfill-releases.ts),
+  // keyed by plugin id -- only meaningful for type "plugin" (effectiveIds are author
+  // ids for type "author", which plugin_releases knows nothing about).
+  const [cmpReleases, setCmpReleases] = useState<Record<number, PluginRelease[]>>({});
+
+  useEffect(() => {
+    if (cmpType !== "plugin" || effectiveIds.length === 0) {
+      setCmpReleases({});
+      return;
+    }
+    let cancelled = false;
+    getPluginReleasesBatch(effectiveIds).then((r) => {
+      if (!cancelled) setCmpReleases(r.releases);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cmpType, idsKey]);
 
   // allCandidates is the capped local list, so a chip added from a remote
   // search result (see suggestions below) won't resolve its name/sub there
@@ -438,6 +459,7 @@ export function SiteStats() {
               focusId={focusId}
               onOpen={(nameId) => navigate(cmpType === "plugin" ? pluginHref(nameId, game) : authorHref(nameId, game))}
               specialEvents={cmpSpecialEvents}
+              releasesByPluginId={cmpReleases}
               showEvents={showCmpEvents}
               showReleases={showCmpReleases}
               onToggleEvents={() => setShowCmpEvents((v) => !v)}
@@ -765,6 +787,7 @@ function CompareResults({
   focusId,
   onOpen,
   specialEvents,
+  releasesByPluginId,
   showEvents,
   showReleases,
   onToggleEvents,
@@ -780,6 +803,7 @@ function CompareResults({
   focusId: number | null;
   onOpen: (nameId: string) => void;
   specialEvents: SpecialEvent[];
+  releasesByPluginId: Record<number, PluginRelease[]>;
   showEvents: boolean;
   showReleases: boolean;
   onToggleEvents: () => void;
@@ -790,15 +814,23 @@ function CompareResults({
   // the same hooks on every render regardless of whether result is loaded yet.
   const dates = result ? dateRangeArray(result.from, result.to) : [];
   const resolvedEvents = useMemo(() => resolveEvents(dates, specialEvents), [dates, specialEvents]);
-  // Per-item day-to-day dateUpdated changes ("Plugin updates") -- each compared item
-  // tracks its own releases independently, unlike events/game-updates which are shared
-  // calendar facts for the whole game.
-  const releaseDaysByItem = useMemo(() => (result?.items ?? []).map((it) => computeReleaseDaySet(it.releases)), [result]);
+  // Real backfilled release history ("Plugin updates") -- each compared item tracks
+  // its own releases independently, unlike events which are shared calendar facts for
+  // the whole game.
+  const releaseMapsByItem = useMemo(
+    () => (result?.items ?? []).map((it) => resolveReleases(dates, releasesByPluginId[it.key])),
+    [result, dates, releasesByPluginId],
+  );
   const releaseDays = useMemo(() => {
     const set = new Set<number>();
-    for (const s of releaseDaysByItem) for (const d of s) set.add(d);
+    for (const m of releaseMapsByItem) for (const [d, r] of m) if (r.isInitial) set.add(d);
     return Array.from(set);
-  }, [releaseDaysByItem]);
+  }, [releaseMapsByItem]);
+  const updateDays = useMemo(() => {
+    const set = new Set<number>();
+    for (const m of releaseMapsByItem) for (const [d, r] of m) if (!r.isInitial) set.add(d);
+    return Array.from(set);
+  }, [releaseMapsByItem]);
   // Zoom lives here (not inside DailyChart) so the Zoom buttons can sit in this
   // component's own header row, matching TrendChart's layout exactly.
   const [zoom, setZoom] = useState<Win | null>(null);
@@ -886,8 +918,15 @@ function CompareResults({
     const ev = showEvents ? resolvedEvents.find((e) => i >= e.a && i <= e.b) : undefined;
     if (ev) return { label: "Event", text: ev.event.title, color: "var(--evText)" };
     if (showReleases) {
-      const releasedNames = items.filter((_, idx) => releaseDaysByItem[idx]?.has(i)).map((it) => it.name);
-      if (releasedNames.length) return { label: "Plugin update", text: releasedNames.join(", "), color: "var(--rel)" };
+      const released: { it: (typeof items)[number]; release: ResolvedRelease }[] = [];
+      for (const [idx, it] of items.entries()) {
+        const release = releaseMapsByItem[idx]?.get(i);
+        if (release) released.push({ it, release });
+      }
+      if (released.length) {
+        const text = released.map(({ it, release }) => (release.version ? `${it.name} (v${release.version})` : it.name)).join(", ");
+        return { label: "Plugin Update", text, color: "var(--rel)" };
+      }
     }
     return null;
   }
@@ -956,10 +995,10 @@ function CompareResults({
                         </svg>
                       </span>
                       <span className="ppc-layer-txt">
-                        <span className="ppc-layer-label">Plugin updates</span>
-                        <span className="ppc-small">Reference line on each item's release date</span>
+                        <span className="ppc-layer-label">Releases &amp; updates</span>
+                        <span className="ppc-small">Each item's first release, and every one after it</span>
                       </span>
-                      <button type="button" className="ppc-switch" role="switch" aria-checked={showReleases} aria-label="Plugin updates" onClick={onToggleReleases} />
+                      <button type="button" className="ppc-switch" role="switch" aria-checked={showReleases} aria-label="Releases and updates" onClick={onToggleReleases} />
                     </label>
                   </div>
                   <div className="ppc-sec">
@@ -989,6 +1028,7 @@ function CompareResults({
             interactive
             events={resolvedEvents}
             releaseDays={releaseDays}
+            updateDays={updateDays}
             showEvents={showEvents}
             showReleases={showReleases}
             zoom={zoom}
@@ -1130,20 +1170,6 @@ function dateRangeArray(from: string, to: string): string[] {
     d = new Date(d.getTime() + 86400000);
   }
   return out;
-}
-
-// Day indices where a compared item's own dateUpdated changed from the previous day --
-// null on either side (before release tracking began, or a plugin with no releases
-// property at all e.g. author-type compares) never counts.
-function computeReleaseDaySet(releases: (string | null)[] | undefined): Set<number> {
-  const set = new Set<number>();
-  if (!releases) return set;
-  for (let i = 1; i < releases.length; i++) {
-    const prev = releases[i - 1];
-    const curr = releases[i];
-    if (prev && curr && prev !== curr) set.add(i);
-  }
-  return set;
 }
 
 function triggerDownload(filename: string, content: string, mime: string) {

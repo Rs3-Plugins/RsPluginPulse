@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import type { GameUpdate, PluginTrendPoint, SpecialEvent } from "../api";
+import type { GameUpdate, PluginRelease, PluginTrendPoint, SpecialEvent } from "../api";
 import type { Game } from "../context/GameContext";
 import {
   annotate,
   computeMilestoneMap,
   computeNotable,
-  computeReleaseSet,
   computeScores,
   DEFAULT_LAYERS,
-  firstReleaseTrackedIndex,
+  firstReleaseIndex,
   resolveEvents,
+  resolveReleases,
   resolveUpdates,
   type Annotation,
   type AnnotationLayers,
@@ -20,6 +20,13 @@ import { CustomRangeCalendar } from "./CustomRangeCalendar";
 export type TrendMetric = "downloadsTotal" | "downloadsToday" | "subscribersTotal";
 export type ChartType = "line" | "bar";
 export type RangeKey = "7" | "30" | "all" | "custom";
+
+interface LinkChoice {
+  kind: "event" | "update" | "release" | "relupdate";
+  label: string;
+  title: string;
+  url: string;
+}
 
 // RuneLite has no separate "downloads"/"subscribers" concepts -- both
 // fields hold the same live install-count gauge, so everything there is
@@ -60,6 +67,7 @@ interface Props {
   onParamsChange: (patch: Record<string, string | null>) => void;
   gameUpdates?: GameUpdate[];
   specialEvents?: SpecialEvent[];
+  releases?: PluginRelease[];
 }
 
 interface Win {
@@ -138,7 +146,7 @@ function readBoolParam(params: URLSearchParams, key: string): boolean {
   return params.get(key) !== "0";
 }
 
-export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, pluginName, initialParams, onParamsChange, gameUpdates, specialEvents }: Props) {
+export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, pluginName, initialParams, onParamsChange, gameUpdates, specialEvents, releases }: Props) {
   // ---------- State (read once from the URL on mount, same as the design handoff) ----------
   const initial = useRef(initialParams).current;
   const [chartType, setChartType] = useState<ChartType>(initial.get("chart") === "bar" ? "bar" : "line");
@@ -176,10 +184,15 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [calOpen, setCalOpen] = useState(false);
   const [width, setWidth] = useState(900);
+  // When a day has more than one clickable link (e.g. an Update block and a
+  // Release block both landing on the same day), clicking asks which one
+  // instead of silently picking by priority -- see hoveredLinks below.
+  const [linkChoice, setLinkChoice] = useState<LinkChoice[] | null>(null);
 
   const plotRef = useRef<HTMLDivElement>(null);
   const rangeAnchorRef = useRef<HTMLDivElement>(null);
   const settingsAnchorRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLElement>(null);
 
   // ---------- URL sync ----------
   useEffect(() => {
@@ -231,12 +244,12 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
   const scores = useMemo(() => computeScores(points, scoreMetric), [points, scoreMetric]);
   const notable = useMemo(() => computeNotable(scores, sens / 100), [scores, sens]);
   const milestoneMap = useMemo(() => computeMilestoneMap(points), [points]);
-  const releaseSet = useMemo(() => computeReleaseSet(points), [points]);
-  const releaseFromIndex = useMemo(() => firstReleaseTrackedIndex(points), [points]);
   const dates = useMemo(() => points.map((p) => p.capturedAt), [points]);
+  const releaseMap = useMemo(() => resolveReleases(dates, releases), [dates, releases]);
+  const releaseFromIndex = useMemo(() => firstReleaseIndex(dates, releases), [dates, releases]);
   const events = useMemo(() => resolveEvents(dates, specialEvents), [dates, specialEvents]);
   const updates = useMemo(() => resolveUpdates(dates, gameUpdates), [dates, gameUpdates]);
-  const ann = (i: number): Annotation => annotate(i, events, updates, notable, releaseSet, milestoneMap, layers);
+  const ann = (i: number): Annotation => annotate(i, events, updates, notable, releaseMap, milestoneMap, layers);
 
   // ---------- Resize ----------
   useEffect(() => {
@@ -255,10 +268,15 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
     function onDown(e: MouseEvent) {
       if (settingsOpen && settingsAnchorRef.current && !settingsAnchorRef.current.contains(e.target as Node)) setSettingsOpen(false);
       if (calOpen && rangeAnchorRef.current && !rangeAnchorRef.current.contains(e.target as Node)) setCalOpen(false);
+      // Clicking away from the chart entirely (not just a plain click inside it,
+      // already handled by the plot's own click handler) drops the drag-selection
+      // too, so a stale "Selected period" bar doesn't linger once you've moved on.
+      if (sel && rootRef.current && !rootRef.current.contains(e.target as Node)) setSel(null);
     }
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
-      if (calOpen) setCalOpen(false);
+      if (linkChoice) setLinkChoice(null);
+      else if (calOpen) setCalOpen(false);
       else if (settingsOpen) setSettingsOpen(false);
       else if (sel) setSel(null);
     }
@@ -268,11 +286,11 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [settingsOpen, calOpen, sel]);
+  }, [settingsOpen, calOpen, sel, linkChoice]);
 
   // ---------- Pointer / wheel interaction (native listeners -- wheel needs { passive: false } for preventDefault, which React's onWheel can't guarantee) ----------
   const geomRef = useRef<{ a: number; b: number; n: number; ml: number; pw: number } | null>(null);
-  const activeLinkRef = useRef<string | null>(null);
+  const activeLinksRef = useRef<LinkChoice[]>([]);
   useEffect(() => {
     const el = plotRef.current;
     if (!el) return;
@@ -337,7 +355,9 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
     }
     function onClick() {
       if (justDragged) return;
-      if (activeLinkRef.current) window.open(activeLinkRef.current, "_blank", "noopener,noreferrer");
+      const links = activeLinksRef.current;
+      if (links.length === 1) window.open(links[0].url, "_blank", "noopener,noreferrer");
+      else if (links.length > 1) setLinkChoice(links);
       else setSel(null);
     }
     function onWheel(e: WheelEvent) {
@@ -418,25 +438,37 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
     const ev: { i: number; bound: "start" | "end" | "ongoing" }[] = [];
     const up: number[] = [];
     const rel: number[] = [];
+    const relupdate: number[] = [];
     for (let i = lo; i <= hi; i++) {
       const a = ann(i);
       if (a.milestone !== undefined) ms.push({ i, threshold: a.milestone });
-      if (a.prim?.cat === "event" && a.prim.bound) ev.push({ i, bound: a.prim.bound });
-      if (a.prim?.cat === "update") up.push(i);
-      if (a.release) rel.push(i);
+      // A release's own marker wins if it lands on the exact same day as an event's
+      // start/end/ongoing boundary dot -- the event's shaded band still covers the
+      // full range either way, and the tooltip still shows both blocks regardless;
+      // this only avoids two shapes stacking on the one point on the line/lane.
+      if (a.prim?.cat === "event" && a.prim.bound && !a.release) ev.push({ i, bound: a.prim.bound });
+      // A plugin's first release is a hard fact that outranks the game-update dot if
+      // both would otherwise land on the exact same point on the line that day.
+      if (a.prim?.cat === "update" && !a.release?.isInitial) up.push(i);
+      if (a.release?.isInitial) rel.push(i);
+      else if (a.release) relupdate.push(i);
     }
-    return { ms, ev, up, rel };
+    return { ms, ev, up, rel, relupdate };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lo, hi, events, updates, notable, releaseSet, milestoneMap, layers]);
-  const markerCount = markers.up.length + markers.ev.length + markers.rel.length;
+  }, [lo, hi, events, updates, notable, releaseMap, milestoneMap, layers]);
+  const markerCount = markers.up.length + markers.ev.length + markers.rel.length + markers.relupdate.length;
 
   // ---------- Timeline lane fill (contiguous same-category day runs, merged into
   // one rect each so an event's whole span fills solid rather than only its ends) ----------
-  const laneFill = useMemo(() => {
+  // Event and Release/Update are two independent layers, not one mutually-exclusive
+  // classification -- a release that happens to land inside an ongoing event's date
+  // range still gets its own tint painted on top (with transparency, see
+  // .ppc-lanefill--rel/--relupdate), rather than the event silently hiding it.
+  const eventFill = useMemo(() => {
     if (!showLane) return [];
     const dayHalf = n > 1 ? pw / (n - 1) / 2 : pw / 2;
-    const segs: { x1: number; x2: number; cls: "ev" | "rel" }[] = [];
-    let curCls: "ev" | "rel" | null = null;
+    const segs: { x1: number; x2: number; cls: "ev" }[] = [];
+    let curCls: "ev" | null = null;
     let curStart = lo;
     const push = (endIndex: number) => {
       if (!curCls) return;
@@ -446,10 +478,32 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
     };
     for (let i = lo; i <= hi; i++) {
       const a = ann(i);
-      // Priority Event > Release: an event's shaded range matters most for context, a
-      // release is a hard fact about the plugin itself. Update is excluded from the
-      // lane fill/markers entirely -- kept only on the series line.
-      const cls: "ev" | "rel" | null = a.prim?.cat === "event" ? "ev" : a.release ? "rel" : null;
+      const cls: "ev" | null = a.prim?.cat === "event" ? "ev" : null;
+      if (cls !== curCls) {
+        push(i - 1);
+        curCls = cls;
+        curStart = i;
+      }
+    }
+    push(hi);
+    return segs;
+  }, [showLane, lo, hi, n, pw, ml, events, notable, releaseMap, milestoneMap, layers]);
+
+  const releaseFill = useMemo(() => {
+    if (!showLane) return [];
+    const dayHalf = n > 1 ? pw / (n - 1) / 2 : pw / 2;
+    const segs: { x1: number; x2: number; cls: "rel" | "relupdate" }[] = [];
+    let curCls: "rel" | "relupdate" | null = null;
+    let curStart = lo;
+    const push = (endIndex: number) => {
+      if (!curCls) return;
+      const x1 = Math.max(ml, X(curStart) - dayHalf);
+      const x2 = Math.min(ml + pw, X(endIndex) + dayHalf);
+      if (x2 > x1) segs.push({ x1, x2, cls: curCls });
+    };
+    for (let i = lo; i <= hi; i++) {
+      const a = ann(i);
+      const cls: "rel" | "relupdate" | null = a.release?.isInitial ? "rel" : a.release ? "relupdate" : null;
       if (cls !== curCls) {
         push(i - 1);
         curCls = cls;
@@ -459,14 +513,32 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
     push(hi);
     return segs;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lo, hi, n, pw, ml, showLane, events, updates, notable, releaseSet, layers]);
+  }, [lo, hi, n, pw, ml, showLane, events, updates, notable, releaseMap, layers]);
 
   // Tell the native click handler (see the pointer-event effect above)
   // whether the hovered day has a link, via a ref rather than re-running
   // that effect (and re-subscribing every listener) on every hover change.
   const hoveredAnn = h !== null ? ann(h) : null;
-  const hoveredLink = hoveredAnn?.prim ? (hoveredAnn.prim.cat === "event" ? hoveredAnn.prim.event?.url ?? null : hoveredAnn.prim.update?.url ?? null) : null;
-  activeLinkRef.current = dragMode ? null : hoveredLink;
+  // kind drives the chip's CSS class; label is what's actually shown -- kept separate
+  // because the game-Update and plugin-Update concepts used to share the bare word
+  // "Update", hence "Game Update" vs "Plugin Update" now, see trendAnnotations.ts.
+  const hoveredLinks: LinkChoice[] = [];
+  if (hoveredAnn?.prim?.cat === "event" && hoveredAnn.prim.event?.url) {
+    hoveredLinks.push({ kind: "event", label: "Event", title: hoveredAnn.prim.event.title, url: hoveredAnn.prim.event.url });
+  }
+  if (hoveredAnn?.prim?.cat === "update" && hoveredAnn.prim.update?.url) {
+    hoveredLinks.push({ kind: "update", label: "Game Update", title: hoveredAnn.prim.update.title, url: hoveredAnn.prim.update.url });
+  }
+  if (hoveredAnn?.release?.url) {
+    const isInitial = hoveredAnn.release.isInitial;
+    hoveredLinks.push({
+      kind: isInitial ? "release" : "relupdate",
+      label: "Plugin Update",
+      title: hoveredAnn.release.version ? `v${hoveredAnn.release.version}` : isInitial ? "Plugin released" : "Plugin updated",
+      url: hoveredAnn.release.url,
+    });
+  }
+  activeLinksRef.current = dragMode ? [] : hoveredLinks;
 
   function openCalendar() {
     setCalOpen((o) => !o);
@@ -483,6 +555,7 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
     setZoomState(null);
     setHover(null);
     setRange((r) => (r === "custom" ? "all" : r));
+    setSel(null);
   }
   function zoomToSelection() {
     if (!sel) return;
@@ -512,7 +585,7 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
     lastY = Y(arr(hi));
 
   return (
-    <section className="ppc" aria-label="Download history">
+    <section className="ppc" aria-label="Download history" ref={rootRef}>
       <header className="ppc-head">
         <div className="ppc-heading">
           <span className="ppc-title">{metricLabel}</span>
@@ -534,6 +607,7 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
                     setZoomState(null);
                     setHover(null);
                     setCalOpen(false);
+                    setSel(null);
                   }}
                 >
                   {k === "all" ? "All" : `${k}D`}
@@ -551,7 +625,7 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
                 events={events}
                 updates={updates}
                 notable={notable}
-                releaseSet={releaseSet}
+                releaseMap={releaseMap}
                 milestoneMap={milestoneMap}
                 layers={layers}
                 currentRange={range === "custom" && zoom ? zoom : null}
@@ -563,10 +637,30 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
           </div>
 
           <div className="ppc-seg" role="group" aria-label="Zoom">
-            <button type="button" className="ppc-icon" aria-label="Zoom out" title="Zoom out" disabled={hi - lo >= lastIndex} onClick={() => zoomBy(1 / 0.6)}>
+            <button
+              type="button"
+              className="ppc-icon"
+              aria-label="Zoom out"
+              title="Zoom out"
+              disabled={hi - lo >= lastIndex}
+              onClick={() => {
+                zoomBy(1 / 0.6);
+                setSel(null);
+              }}
+            >
               <ZoomOutIcon />
             </button>
-            <button type="button" className="ppc-icon" aria-label="Zoom in" title="Zoom in" disabled={hi - lo <= MINW} onClick={() => zoomBy(0.6)}>
+            <button
+              type="button"
+              className="ppc-icon"
+              aria-label="Zoom in"
+              title="Zoom in"
+              disabled={hi - lo <= MINW}
+              onClick={() => {
+                zoomBy(0.6);
+                setSel(null);
+              }}
+            >
               <ZoomInIcon />
             </button>
             <button type="button" className="ppc-reset" aria-label="Reset zoom" disabled={!zoom} onClick={resetZoom}>
@@ -598,7 +692,7 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
       <div className="ppc-plotwrap">
         <div
           ref={plotRef}
-          className={`ppc-plot ${hoveredLink && !dragMode ? "is-link" : ""} ${dragMode === "pan" ? "is-panning" : ""}`}
+          className={`ppc-plot ${hoveredLinks.length > 0 && !dragMode ? "is-link" : ""} ${dragMode === "pan" ? "is-panning" : ""}`}
           style={{ height: H }}
         >
           <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Download history chart">
@@ -690,8 +784,11 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
             {showLane && (
               <>
                 <rect className="ppc-s-lane" x={ml} y={laneY} width={pw} height={laneH} rx={3} />
-                {laneFill.map((s, k) => (
-                  <rect key={k} className={`ppc-lanefill ppc-lanefill--${s.cls}`} x={s.x1} y={laneY} width={s.x2 - s.x1} height={laneH} />
+                {eventFill.map((s, k) => (
+                  <rect key={`ef-${k}`} className={`ppc-lanefill ppc-lanefill--${s.cls}`} x={s.x1} y={laneY} width={s.x2 - s.x1} height={laneH} />
+                ))}
+                {releaseFill.map((s, k) => (
+                  <rect key={`rf-${k}`} className={`ppc-lanefill ppc-lanefill--${s.cls}`} x={s.x1} y={laneY} width={s.x2 - s.x1} height={laneH} />
                 ))}
                 {layers.rel && releaseFromVisible && releaseFromIndex !== null && (
                   <rect x={ml} y={laneY} width={Math.max(0, Math.min(pw, X(releaseFromIndex) - ml))} height={laneH} rx={3} fill="url(#ppcHatch)" />
@@ -717,7 +814,16 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
                 ),
               )}
             {layers.up && markers.up.map((i) => <circle key={`up-${i}`} className="ppc-m-up" cx={X(i)} cy={Y(arr(i))} r={4.5} />)}
-            {layers.rel && markers.rel.map((i) => <rect key={`rel-${i}`} className="ppc-m-rel" x={X(i) - 4} y={laneY + laneH / 2 - 4} width={8} height={8} rx={2} />)}
+            {layers.rel && markers.rel.map((i) => <rect key={`rel-${i}`} className="ppc-m-rel" x={X(i) - 4} y={Y(arr(i)) - 4} width={8} height={8} rx={2} />)}
+            {layers.rel &&
+              markers.relupdate.map((i) => (
+                <rect key={`relu-${i}`} className="ppc-m-relupdate" x={X(i) - 4} y={Y(arr(i)) - 4} width={8} height={8} />
+              ))}
+            {layers.rel && markers.rel.map((i) => <rect key={`lane-rel-${i}`} className="ppc-m-rel" x={X(i) - 4} y={laneY + laneH / 2 - 4} width={8} height={8} rx={2} />)}
+            {layers.rel &&
+              markers.relupdate.map((i) => (
+                <rect key={`lane-relu-${i}`} className="ppc-m-relupdate" x={X(i) - 4} y={laneY + laneH / 2 - 4} width={8} height={8} />
+              ))}
             {layers.ev && markers.ev.map(({ i }) => <circle key={`lane-ev-${i}`} className="ppc-m-ev" cx={X(i)} cy={laneY + laneH / 2} r={4} />)}
 
             {h !== null && !bar && <circle className="ppc-s-dot" cx={X(h)} cy={Y(arr(h))} r={4.5} />}
@@ -783,6 +889,25 @@ export function TrendChart({ points, metric, scoreMetric, metricLabel, unit, plu
       {sel && sel.b > sel.a && <SelectionBar points={points} sel={sel} metric={scoreMetric} ann={ann} onZoom={zoomToSelection} onClear={() => setSel(null)} />}
 
       <KeyFooter />
+
+      {linkChoice && (
+        <div className="legal-overlay" onClick={() => setLinkChoice(null)}>
+          <div role="dialog" aria-modal="true" aria-label="Choose a link to open" className="legal-dialog confirm-dialog ppc-modal" onClick={(e) => e.stopPropagation()}>
+            <span className="ppc-eyebrow">This day has more than one link -- which one?</span>
+            <div className="ppc-modal-links">
+              {linkChoice.map((l, k) => (
+                <a key={k} className="ppc-modal-link" href={l.url} target="_blank" rel="noopener noreferrer" onClick={() => setLinkChoice(null)}>
+                  <span className={`ppc-chip ppc-chip--${l.kind}`}>{l.label}</span>
+                  <span className="ppc-modal-link-title">{l.title}</span>
+                </a>
+              ))}
+            </div>
+            <button type="button" className="ppc-btn-secondary" onClick={() => setLinkChoice(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -850,7 +975,7 @@ function Tooltip({
       meta = "";
     }
     const chipClass = isEvent ? "event" : ann.prim.cat;
-    const chipLabel = isEvent ? "Event" : "Update";
+    const chipLabel = isEvent ? "Event" : "Game Update";
     blocks.push(
       <div className="ppc-tip-block" key="prim">
         <div className="ppc-tip-blockhead">
@@ -866,14 +991,18 @@ function Tooltip({
     );
   }
   if (ann.release) {
+    const r = ann.release;
+    const relTitle = r.version ? `${r.isInitial ? "Released" : "Updated to"} v${r.version}` : r.isInitial ? "Plugin released" : "Plugin updated";
+    const changelogLine = r.changelog?.split("\n").find((l) => l.trim())?.trim();
     blocks.push(
       <div className="ppc-tip-block" key="rel">
         <div className="ppc-tip-blockhead">
-          <span className="ppc-chip ppc-chip--release">Release</span>
-          Plugin change
+          <span className={`ppc-chip ppc-chip--${r.isInitial ? "release" : "relupdate"}`}>Plugin Update</span>
+          {r.source === "modio" ? "mod.io" : "plugin-hub"}
         </div>
-        <div className="ppc-tip-title">Plugin updated this day</div>
-        <div className="ppc-tip-meta">New version detected on mod.io</div>
+        <div className="ppc-tip-title">{relTitle}</div>
+        {changelogLine && <div className="ppc-tip-meta">{changelogLine}</div>}
+        <div className={`ppc-tip-link${r.url ? "" : " is-none"}`}>{r.url ? "Click to view on GitHub ↗" : "No link available"}</div>
       </div>,
     );
   }
@@ -1038,7 +1167,7 @@ function KeyFooter() {
           </svg>
           <span>
             <span className="ppc-key-name" style={{ color: "var(--up)" }}>
-              Update
+              Game Update
             </span>
             <span className="ppc-key-desc">Notable move within a day of a game update</span>
           </span>
@@ -1049,9 +1178,9 @@ function KeyFooter() {
           </svg>
           <span>
             <span className="ppc-key-name" style={{ color: "var(--rel)" }}>
-              Release
+              Plugin Update
             </span>
-            <span className="ppc-key-desc">The plugin itself was updated. Shown in the timeline lane</span>
+            <span className="ppc-key-desc">The plugin's own version history. Shown in the timeline lane</span>
           </span>
         </div>
         <div className="ppc-key-item">
@@ -1135,7 +1264,17 @@ function exportTrend(points: PluginTrendPoint[], win: Win, ann: (i: number) => A
       ? [
           "date,downloads_total,downloads_today,subscribers_total,annotation,title,url,release,milestone",
           ...rows.map((r) =>
-            [r.date, r.downloads_total, r.downloads_today, r.subscribers_total, r.annotation, `"${r.title.replace(/"/g, '""')}"`, r.url, r.release, r.milestone].join(","),
+            [
+              r.date,
+              r.downloads_total,
+              r.downloads_today,
+              r.subscribers_total,
+              r.annotation,
+              `"${r.title.replace(/"/g, '""')}"`,
+              r.url,
+              r.release ? (r.release.version ?? "release") : "",
+              r.milestone,
+            ].join(","),
           ),
         ].join("\n")
       : JSON.stringify(rows, null, 2);

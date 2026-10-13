@@ -299,6 +299,36 @@ export interface SpecialEventInput {
   url: string | null;
 }
 
+// See schema.sql's plugin_releases table comment for the "source"/"source_key"
+// upsert-key rationale.
+// "unavailable" is the plugin-hub bot pulling a broken plugin from the hub
+// listing (a "disable X"/"unavailable X" commit) -- a real event worth
+// tracking, but not a content/version change, so the frontend should never
+// show it as a Release/Update marker. mod.io releases are always "update".
+export type PluginReleaseKind = "update" | "unavailable";
+
+export interface PluginRelease {
+  id: number;
+  pluginId: number;
+  source: "modio" | "plugin-hub";
+  kind: PluginReleaseKind;
+  releasedAt: string;
+  version: string | null;
+  changelog: string | null;
+  url: string | null;
+}
+
+export interface PluginReleaseInput {
+  pluginId: number;
+  source: "modio" | "plugin-hub";
+  sourceKey: string;
+  kind: PluginReleaseKind;
+  releasedAt: string;
+  version: string | null;
+  changelog: string | null;
+  url: string | null;
+}
+
 export type CompareType = "plugin" | "author";
 export type CompareMetric = "total" | "daily" | "subs";
 export type CompareRange = 30 | 90 | "all";
@@ -321,11 +351,6 @@ export interface CompareItem {
   name: string;
   sub: string;
   series: number[];
-  // Per-day ISO dateUpdated snapshot, aligned 1:1 with `series` -- only
-  // populated for type "plugin" (an author's releases don't collapse into
-  // one series, see getCompareData). A day-to-day change in this value
-  // marks a plugin release ("Plugin updates" in the Compare chart).
-  releases?: (string | null)[];
   stats: CompareItemStats;
 }
 

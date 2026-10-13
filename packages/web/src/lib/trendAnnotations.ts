@@ -14,7 +14,7 @@
 //   - milestones keep this app's existing richer threshold ladder tied to
 //     downloadsTotal specifically, regardless of the displayed metric,
 //     rather than the handoff's simplified 4-threshold example.
-import type { GameUpdate, PluginTrendPoint, SpecialEvent } from "../api";
+import type { GameUpdate, PluginRelease, PluginTrendPoint, SpecialEvent } from "../api";
 import type { TrendMetric } from "../components/TrendChart";
 
 // Days either side of a game update attributable to it. Updates land
@@ -42,7 +42,7 @@ export interface PrimaryAnnotation {
 
 export interface Annotation {
   prim: PrimaryAnnotation | null;
-  release: boolean;
+  release: ResolvedRelease | null;
   milestone: number | undefined;
 }
 
@@ -114,23 +114,58 @@ export function computeMilestoneMap(points: PluginTrendPoint[]): Map<number, num
   return map;
 }
 
-// Index set where the plugin's own dateUpdated changed from the previous
-// day -- null on either side (before release tracking began) never counts.
-export function computeReleaseSet(points: PluginTrendPoint[]): Set<number> {
-  const set = new Set<number>();
-  for (let i = 1; i < points.length; i++) {
-    const prev = points[i - 1].dateUpdated;
-    const curr = points[i].dateUpdated;
-    if (prev && curr && prev !== curr) set.add(i);
-  }
-  return set;
+// A release tagged with whether it's the plugin's very first recorded one
+// (within the backfill's own coverage, see resolveReleases) -- the initial
+// "Release" vs every "Update" after it.
+export interface ResolvedRelease extends PluginRelease {
+  isInitial: boolean;
 }
 
-// The first index whose dateUpdated is non-null -- release tracking only
-// exists from here forward for this plugin (see schema.sql's migration).
-export function firstReleaseTrackedIndex(points: PluginTrendPoint[]): number | null {
-  const i = points.findIndex((p) => p.dateUpdated !== null);
-  return i === -1 ? null : i;
+// Real backfilled release history (plugin_releases, see
+// packages/ingest/src/backfill-releases.ts) rather than inferring a release
+// from day-to-day plugin_snapshots.date_updated changes -- that forward-
+// only signal only ever caught releases from whenever tracking happened to
+// begin for a given plugin, where this reflects every release mod.io/the
+// plugin-hub actually recorded back to the backfill's own cutoff.
+//
+// Two things collapse multiple raw rows into one entry per day:
+//   - kind !== "update" (plugin-hub's "disable X"/"unavailable X" events)
+//     is filtered out entirely -- still stored for later, just never a
+//     chart marker.
+//   - If more than one real update lands on the same day (rare, but
+//     possible), only the latest survives -- the frontend shows one marker
+//     per day, not a stack of same-day revisions.
+export function resolveReleases(dates: string[], releases: PluginRelease[] | undefined): Map<number, ResolvedRelease> {
+  const map = new Map<number, ResolvedRelease>();
+  if (!releases || releases.length === 0 || dates.length === 0) return map;
+  const updates = releases.filter((r) => r.kind === "update");
+  if (updates.length === 0) return map;
+  const dayMs = 24 * 60 * 60 * 1000;
+  const rangeStart = new Date(dates[0]).getTime() - dayMs;
+  const rangeEnd = new Date(dates[dates.length - 1]).getTime() + dayMs;
+  // Earliest across the plugin's *full* release history (not just what's in
+  // the visible window), so "is this the first one" stays correct regardless
+  // of zoom/pan.
+  const earliest = updates.reduce((min, r) => (r.releasedAt < min ? r.releasedAt : min), updates[0].releasedAt);
+  for (const r of updates) {
+    const t = new Date(r.releasedAt).getTime();
+    if (t < rangeStart || t > rangeEnd) continue;
+    const idx = nearestDateIndex(dates, t);
+    const existing = map.get(idx);
+    if (existing && existing.releasedAt >= r.releasedAt) continue;
+    map.set(idx, { ...r, isInitial: r.releasedAt === earliest });
+  }
+  return map;
+}
+
+// The earliest release's index -- everything before this is "no release
+// data" (either the backfill's own cutoff, or this plugin genuinely has no
+// recorded releases yet), not a per-plugin tracking-start artifact.
+export function firstReleaseIndex(dates: string[], releases: PluginRelease[] | undefined): number | null {
+  const updates = releases?.filter((r) => r.kind === "update") ?? [];
+  if (updates.length === 0 || dates.length === 0) return null;
+  const earliest = updates.reduce((min, r) => (r.releasedAt < min ? r.releasedAt : min), updates[0].releasedAt);
+  return nearestDateIndex(dates, new Date(earliest).getTime());
 }
 
 function nearestDateIndex(dates: string[], timeMs: number): number {
@@ -207,7 +242,7 @@ export function annotate(
   events: ResolvedEvent[],
   updates: ResolvedUpdate[],
   notable: boolean[],
-  releases: Set<number>,
+  releases: Map<number, ResolvedRelease>,
   milestones: Map<number, number>,
   layers: AnnotationLayers,
 ): Annotation {
@@ -224,7 +259,11 @@ export function annotate(
   }
   return {
     prim,
-    release: layers.rel && notable[i] && releases.has(i),
+    // Unlike Update (an inferred "this spike probably correlates with an
+    // update"), a release here is a verified historical fact from
+    // plugin_releases -- it isn't gated behind notable[i] the way the old
+    // date_updated-diff heuristic was, for the same reason Event isn't.
+    release: layers.rel ? (releases.get(i) ?? null) : null,
     milestone: layers.ms ? milestones.get(i) : undefined,
   };
 }

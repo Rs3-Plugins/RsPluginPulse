@@ -25,6 +25,8 @@ import type {
   NewReleaseRow,
   Period,
   PluginLeaderboardRow,
+  PluginRelease,
+  PluginReleaseInput,
   PluginTrendPoint,
   SearchResult,
   SiteStats,
@@ -941,7 +943,6 @@ interface DailySeriesPoint {
   total: number;
   today: number;
   subs: number;
-  release: string | null;
 }
 
 function daysAgoDate(n: number): Date {
@@ -993,12 +994,11 @@ async function getDailySeriesByPlugin(
      SELECT d.day, p.id AS plugin_id,
             COALESCE(l.downloads_total, 0) AS downloads_total,
             COALESCE(l.downloads_today, 0) AS downloads_today,
-            COALESCE(l.subscribers_total, 0) AS subscribers_total,
-            l.date_updated
+            COALESCE(l.subscribers_total, 0) AS subscribers_total
      FROM days d
      CROSS JOIN plugins p
      LEFT JOIN LATERAL (
-       SELECT downloads_total, downloads_today, subscribers_total, date_updated
+       SELECT downloads_total, downloads_today, subscribers_total
        FROM plugin_snapshots s
        WHERE s.plugin_id = p.id AND s.captured_at < d.day + interval '1 day'
        ORDER BY s.captured_at DESC LIMIT 1
@@ -1016,7 +1016,6 @@ async function getDailySeriesByPlugin(
       total: Number(row.downloads_total),
       today: Number(row.downloads_today),
       subs: Number(row.subscribers_total),
-      release: row.date_updated ? row.date_updated.toISOString() : null,
     });
     map.set(row.plugin_id, list);
   }
@@ -1030,11 +1029,6 @@ function sumDailySeries(lists: DailySeriesPoint[][]): DailySeriesPoint[] {
     total: lists.reduce((sum, l) => sum + (l[i]?.total ?? 0), 0),
     today: lists.reduce((sum, l) => sum + (l[i]?.today ?? 0), 0),
     subs: lists.reduce((sum, l) => sum + (l[i]?.subs ?? 0), 0),
-    // Author compare aggregates multiple plugins into one series -- a single
-    // plugin's release date doesn't mean anything at that level, so this is
-    // intentionally not populated (see getCompareData, which only exposes
-    // `releases` for type === "plugin").
-    release: null,
   }));
 }
 
@@ -1042,10 +1036,6 @@ function extractMetricSeries(series: DailySeriesPoint[], metric: CompareMetric, 
   if (metric === "total") return series.slice(padCount).map((p) => p.total);
   if (metric === "subs") return series.slice(padCount).map((p) => p.subs);
   return rollingAvg7(series.map((p) => p.today)).slice(padCount);
-}
-
-function extractReleaseSeries(series: DailySeriesPoint[], padCount = 0): (string | null)[] {
-  return series.slice(padCount).map((p) => p.release);
 }
 
 // The aggregation itself is cheap (tag cloud is at most a few thousand
@@ -1358,7 +1348,6 @@ export async function getCompareData(type: CompareType, keys: number[], metric: 
         name: row.name,
         sub: `by ${row.author_name}`,
         series: extractMetricSeries(seriesMap.get(id) ?? [], metric, padCount),
-        releases: extractReleaseSeries(seriesMap.get(id) ?? [], padCount),
         stats: {
           all: Number(row.total_now),
           hot: Number(row.today_now),
@@ -1502,6 +1491,95 @@ export async function upsertGameUpdates(updates: GameUpdateInput[]): Promise<num
     client.release();
   }
   return updates.length;
+}
+
+// Plain id + external key per plugin in a game, for the one-time release
+// backfill (packages/ingest/src/backfill-releases.ts) to iterate over --
+// "external key" is the mod.io numeric id re-stringified for 'runescape',
+// or the plugin-hub internalName (name_id) for 'runelite'.
+// dateAdded is the plugin's own upstream "first published" timestamp (mod.io's
+// date_added / RuneLite manifest's createdAt -- see plugins.date_added's own
+// comment in schema.sql), not a locally-synthesized "when we first saw it" --
+// used by the release backfill to anchor a synthetic first release when the
+// real tracked history doesn't reach back that far (see backfill-releases.ts).
+export async function listPluginIdsForGame(game: string): Promise<{ id: number; nameId: string; dateAdded: string }[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT id, name_id, date_added FROM plugins WHERE game = $1 ORDER BY id`, [game]);
+  return rows.map((r) => ({ id: r.id, nameId: r.name_id, dateAdded: r.date_added.toISOString() }));
+}
+
+// Upserts on (plugin_id, source, source_key) so re-running the backfill (or
+// a later recurring job built on the same fetchers) is a no-op on releases
+// it's already seen -- see schema.sql's plugin_releases comment.
+export async function upsertPluginReleases(releases: PluginReleaseInput[]): Promise<number> {
+  if (releases.length === 0) return 0;
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const r of releases) {
+      await client.query(
+        `INSERT INTO plugin_releases (plugin_id, source, source_key, kind, released_at, version, changelog, url)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (plugin_id, source, source_key) DO UPDATE SET
+           kind = EXCLUDED.kind,
+           released_at = EXCLUDED.released_at,
+           version = EXCLUDED.version,
+           changelog = EXCLUDED.changelog,
+           url = EXCLUDED.url`,
+        [r.pluginId, r.source, r.sourceKey, r.kind, r.releasedAt, r.version, r.changelog, r.url],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+  return releases.length;
+}
+
+export async function getPluginReleases(pluginId: number): Promise<PluginRelease[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT id, plugin_id, source, kind, released_at, version, changelog, url
+     FROM plugin_releases WHERE plugin_id = $1 ORDER BY released_at DESC`,
+    [pluginId],
+  );
+  return rows.map(toPluginRelease);
+}
+
+// Batch form for the Compare page (up to 4 plugins at once, see /api/plugins/releases).
+export async function getPluginReleasesForIds(pluginIds: number[]): Promise<Map<number, PluginRelease[]>> {
+  const map = new Map<number, PluginRelease[]>();
+  if (pluginIds.length === 0) return map;
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT id, plugin_id, source, kind, released_at, version, changelog, url
+     FROM plugin_releases WHERE plugin_id = ANY($1::int[]) ORDER BY plugin_id, released_at DESC`,
+    [pluginIds],
+  );
+  for (const row of rows) {
+    const release = toPluginRelease(row);
+    const list = map.get(release.pluginId) ?? [];
+    list.push(release);
+    map.set(release.pluginId, list);
+  }
+  return map;
+}
+
+function toPluginRelease(r: any): PluginRelease {
+  return {
+    id: r.id,
+    pluginId: r.plugin_id,
+    source: r.source,
+    kind: r.kind,
+    releasedAt: r.released_at.toISOString(),
+    version: r.version,
+    changelog: r.changelog,
+    url: r.url,
+  };
 }
 
 // Wholesale-replaces special_events from packages/ingest/data/special-

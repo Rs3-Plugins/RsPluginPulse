@@ -3,12 +3,14 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   API_BASE,
   getGameUpdates,
+  getPluginReleases,
   getPluginTrend,
   getSpecialEvents,
   getTopPlugins,
   type GameUpdate,
   type PluginLeaderboardRow,
   type PluginMeta,
+  type PluginRelease,
   type PluginTrendPoint,
   type SpecialEvent,
 } from "../api";
@@ -33,6 +35,7 @@ export function PluginTrend() {
   const [points, setPoints] = useState<PluginTrendPoint[] | null>(null);
   const [gameUpdates, setGameUpdates] = useState<GameUpdate[]>([]);
   const [specialEvents, setSpecialEvents] = useState<SpecialEvent[]>([]);
+  const [releases, setReleases] = useState<PluginRelease[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Metric is the one piece of chart state this page still owns directly
@@ -86,6 +89,10 @@ export function PluginTrend() {
         setPlugin(res.plugin);
         setPoints(res.trend);
         setGame(res.plugin.game);
+
+        getPluginReleases(res.pluginId, res.plugin.game)
+          .then((releasesRes) => setReleases(releasesRes.releases))
+          .catch(() => setReleases([]));
 
         if (res.trend.length > 0) {
           const from = res.trend[0].capturedAt.slice(0, 10);
@@ -415,6 +422,7 @@ export function PluginTrend() {
         onParamsChange={handleChartParamsChange}
         gameUpdates={gameUpdates}
         specialEvents={specialEvents}
+        releases={releases}
       />
 
       {showSimilarModal && (

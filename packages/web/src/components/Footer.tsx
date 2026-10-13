@@ -1,8 +1,46 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getStatus } from "../api";
+import type { Game } from "../context/GameContext";
 import { LegalModal, type LegalDoc } from "./LegalModal";
+
+// Must track deploy/configure.sh's INGEST_INTERVAL (defaults to 1h there) --
+// the frontend has no way to read that server-side cron config directly, so
+// "next refresh" is an estimate (last snapshot + this), not a guarantee. If
+// that interval ever changes, update this to match.
+const INGEST_INTERVAL_MS = 60 * 60 * 1000;
+
+// Fetches /api/status for one game once (no polling -- a footer line isn't
+// worth repeatedly hitting the API for) and shows a plain clock time for
+// when the next refresh is expected, rather than a live countdown.
+function useNextRefresh(game: Game): string | null {
+  const [text, setText] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setText(null);
+    getStatus(game)
+      .then((res) => {
+        if (cancelled || !res.updatedAt) return;
+        setText(formatNextRefreshTime(new Date(res.updatedAt).getTime()));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [game]);
+
+  return text;
+}
+
+function formatNextRefreshTime(lastUpdatedMs: number): string {
+  const nextAt = new Date(lastUpdatedMs + INGEST_INTERVAL_MS);
+  return nextAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
 
 export function Footer() {
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null);
+  const runescapeNext = useNextRefresh("runescape");
+  const runeliteNext = useNextRefresh("runelite");
 
   return (
     <footer className="site-footer">
@@ -52,7 +90,10 @@ export function Footer() {
         </div>
         <div className="site-footer-bottom">
           <span>© {new Date().getFullYear()} PluginPulse. All rights reserved.</span>
-          <span>Data refreshed from mod.io every few minutes.</span>
+          <span>
+            RuneScape data {runescapeNext ? `refreshes ~${runescapeNext}` : "refreshes roughly every hour"} · RuneLite/OSRS data{" "}
+            {runeliteNext ? `refreshes ~${runeliteNext}` : "refreshes roughly every hour"}.
+          </span>
         </div>
       </div>
 
