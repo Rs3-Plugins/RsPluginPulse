@@ -168,6 +168,35 @@ export async function getRandomPluginId(game = "runescape"): Promise<{ id: numbe
   return { id: rows[0].id, nameId: rows[0].name_id };
 }
 
+// Authors have no slug of their own upstream (see schema.sql), so every
+// nameId handed out here is derived from author_name via slugify(). Two
+// authors can collide on that derived slug -- most commonly non-Latin
+// names, which slugify() strips down to "" since it only keeps [a-z0-9] --
+// so collisions are resolved by suffixing -2, -3... onto every name after
+// the first, in author_id order (lowest id keeps the bare slug). Ordering
+// by author_id rather than query order keeps the assignment stable across
+// calls instead of depending on incidental row order.
+async function getAuthorSlugMap(game: string): Promise<Map<number, string>> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT DISTINCT pa.author_id, pa.author_name
+     FROM plugin_authors pa
+     JOIN plugins p ON p.id = pa.plugin_id
+     WHERE p.game = $1
+     ORDER BY pa.author_id ASC`,
+    [game],
+  );
+  const seen = new Map<string, number>();
+  const map = new Map<number, string>();
+  for (const row of rows) {
+    const base = slugify(row.author_name) || "author";
+    const count = (seen.get(base) ?? 0) + 1;
+    seen.set(base, count);
+    map.set(row.author_id, count === 1 ? base : `${base}-${count}`);
+  }
+  return map;
+}
+
 // Newest plugins first -- unlike the leaderboards, this intentionally
 // includes everything (no library-tag exclusion) since it's about
 // discoverability, not ranking fairness.
@@ -184,13 +213,14 @@ export async function getNewestPlugins(limit = 50, game = "runescape"): Promise<
      LIMIT $1`,
     [limit, game],
   );
+  const authorSlugs = await getAuthorSlugMap(game);
   return rows.map((row) => ({
     id: row.id,
     nameId: row.name_id,
     name: row.name,
     authorId: row.author_id,
     authorName: row.author_name,
-    authorNameId: slugify(row.author_name),
+    authorNameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
     profileUrl: row.profile_url,
     tags: row.tags ?? [],
     logoUrl: row.logo_url,
@@ -328,7 +358,8 @@ async function topPluginsByLatestMetric(metric: "downloads_total" | "downloads_t
      LIMIT $1`,
     [limit, LEADERBOARD_EXCLUDED_TAG, game],
   );
-  return rows.map(toPluginRow);
+  const authorSlugs = await getAuthorSlugMap(game);
+  return rows.map((row) => toPluginRow(row, authorSlugs));
 }
 
 // Downloads gained between the latest snapshot and the nearest snapshot at
@@ -355,7 +386,8 @@ async function topPluginsByGain(cutoffDays: number, game: string, limit: number)
      LIMIT $1`,
     [limit, cutoffDays, LEADERBOARD_EXCLUDED_TAG, game],
   );
-  return rows.map(toPluginRow);
+  const authorSlugs = await getAuthorSlugMap(game);
+  return rows.map((row) => toPluginRow(row, authorSlugs));
 }
 
 // Rank of specific plugins within the alltime/hot leaderboard, without
@@ -418,6 +450,7 @@ export async function getFastestGrowingPlugins(limit = 5, cutoffDays = 7, game =
      LIMIT $1`,
     [limit, cutoffDays, LEADERBOARD_EXCLUDED_TAG, game],
   );
+  const authorSlugs = await getAuthorSlugMap(game);
   return rows
     .map((row) => ({
       id: row.id,
@@ -425,7 +458,7 @@ export async function getFastestGrowingPlugins(limit = 5, cutoffDays = 7, game =
       name: row.name,
       authorId: row.author_id,
       authorName: row.author_name,
-      authorNameId: slugify(row.author_name),
+      authorNameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
       profileUrl: row.profile_url,
       downloadsTotal: Number(row.downloads_total),
       subscribersTotal: Number(row.subscribers_total),
@@ -608,6 +641,7 @@ export async function searchPluginsAndAuthors(
     [q, game, LEADERBOARD_EXCLUDED_TAG, authorLimit],
   );
 
+  const authorSlugs = await getAuthorSlugMap(game);
   return {
     plugins: pluginsResult.rows.map((row) => ({
       id: row.id,
@@ -619,7 +653,7 @@ export async function searchPluginsAndAuthors(
     })),
     authors: authorsResult.rows.map((row) => ({
       id: row.author_id,
-      nameId: slugify(row.author_name),
+      nameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
       name: row.author_name,
       avatarUrl: row.author_avatar_url,
       pluginCount: Number(row.plugin_count),
@@ -652,16 +686,19 @@ export interface PluginMeta {
   dateUpdated: string;
 }
 
-export async function getPluginCoAuthors(pluginId: number): Promise<CoAuthor[]> {
+export async function getPluginCoAuthors(pluginId: number, game: string): Promise<CoAuthor[]> {
   const pool = getPool();
-  const { rows } = await pool.query(
-    `SELECT author_id, author_name, author_avatar_url, author_profile_url
-     FROM plugin_authors WHERE plugin_id = $1 ORDER BY position ASC`,
-    [pluginId],
-  );
+  const [{ rows }, authorSlugs] = await Promise.all([
+    pool.query(
+      `SELECT author_id, author_name, author_avatar_url, author_profile_url
+       FROM plugin_authors WHERE plugin_id = $1 ORDER BY position ASC`,
+      [pluginId],
+    ),
+    getAuthorSlugMap(game),
+  ]);
   return rows.map((row) => ({
     authorId: row.author_id,
-    nameId: slugify(row.author_name),
+    nameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
     name: row.author_name,
     avatarUrl: row.author_avatar_url,
     profileUrl: row.author_profile_url,
@@ -679,7 +716,7 @@ export async function getPlugin(pluginId: number): Promise<PluginMeta | null> {
   );
   if (rows.length === 0) return null;
   const row = rows[0];
-  const coAuthors = await getPluginCoAuthors(pluginId);
+  const [coAuthors, authorSlugs] = await Promise.all([getPluginCoAuthors(pluginId, row.game), getAuthorSlugMap(row.game)]);
   return {
     id: row.id,
     game: row.game,
@@ -687,7 +724,7 @@ export async function getPlugin(pluginId: number): Promise<PluginMeta | null> {
     name: row.name,
     authorId: row.author_id,
     authorName: row.author_name,
-    authorNameId: slugify(row.author_name),
+    authorNameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
     authorAvatarUrl: row.author_avatar_url,
     coAuthors,
     profileUrl: row.profile_url,
@@ -732,7 +769,7 @@ export async function getPluginInfo(pluginId: number): Promise<PluginInfo | null
   );
   if (rows.length === 0) return null;
   const row = rows[0];
-  const coAuthors = await getPluginCoAuthors(pluginId);
+  const [coAuthors, authorSlugs] = await Promise.all([getPluginCoAuthors(pluginId, row.game), getAuthorSlugMap(row.game)]);
   return {
     id: row.id,
     game: row.game,
@@ -740,7 +777,7 @@ export async function getPluginInfo(pluginId: number): Promise<PluginInfo | null
     name: row.name,
     authorId: row.author_id,
     authorName: row.author_name,
-    authorNameId: slugify(row.author_name),
+    authorNameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
     authorAvatarUrl: row.author_avatar_url,
     coAuthors,
     profileUrl: row.profile_url,
@@ -776,14 +813,14 @@ export async function getPluginTrend(pluginId: number): Promise<PluginTrendPoint
   }));
 }
 
-function toPluginRow(row: any): PluginLeaderboardRow {
+function toPluginRow(row: any, authorSlugs: Map<number, string>): PluginLeaderboardRow {
   return {
     id: row.id,
     nameId: row.name_id,
     name: row.name,
     authorId: row.author_id,
     authorName: row.author_name,
-    authorNameId: slugify(row.author_name),
+    authorNameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
     authorAvatarUrl: row.author_avatar_url,
     profileUrl: row.profile_url,
     tags: row.tags ?? [],
@@ -1304,7 +1341,7 @@ export async function getCompareData(type: CompareType, keys: number[], metric: 
     byAuthor.get(authorId)!.reduce((min, r) => (r.date_added < min ? r.date_added : min), byAuthor.get(authorId)![0].date_added);
   const game = pluginRows[0].game;
 
-  const authorRanks = await getAuthorRanks(orderedKeys, "alltime", game);
+  const [authorRanks, authorSlugs] = await Promise.all([getAuthorRanks(orderedKeys, "alltime", game), getAuthorSlugMap(game)]);
   const rankOfAuthor = (authorId: number) => authorRanks.get(authorId) ?? null;
 
   const { fromDate, toDate } = resolveCompareRange(
@@ -1325,7 +1362,7 @@ export async function getCompareData(type: CompareType, keys: number[], metric: 
     const subs = plugins.reduce((sum, r) => sum + Number(r.subs_now), 0);
     return {
       key: authorId,
-      nameId: slugify(plugins[0].author_name),
+      nameId: authorSlugs.get(authorId) ?? slugify(plugins[0].author_name),
       name: plugins[0].author_name,
       sub: `${plugins.length} ${plugins.length === 1 ? "plugin" : "plugins"}`,
       series: extractMetricSeries(sumSeries, metric, padCount),
@@ -1367,27 +1404,22 @@ export async function getPluginIdByNameId(nameId: string, game: string): Promise
 
 // Authors have no stored slug (author info is denormalized across
 // plugins/plugin_authors, not a dedicated table), so this resolves a
-// pretty URL slug back to an author_id by slugifying every distinct
-// author name in the game and matching -- same slugify() used when the
-// API annotates rows with nameId, so a slug it hands out always resolves
-// back here. Ties (two different author_ids slugifying to the same
-// string) pick the lowest id, which is at least deterministic.
+// pretty URL slug back to an author_id via the same disambiguated map
+// (see getAuthorSlugMap) used to hand the slug out in the first place, so
+// a slug the API hands out always resolves back to the right author even
+// when it was suffixed to break a collision.
 export async function getAuthorIdBySlug(slug: string, game: string): Promise<number | null> {
-  const pool = getPool();
-  const { rows } = await pool.query(
-    `SELECT DISTINCT pa.author_id, pa.author_name
-     FROM plugin_authors pa
-     JOIN plugins p ON p.id = pa.plugin_id
-     WHERE p.game = $1
-     ORDER BY pa.author_id ASC`,
-    [game],
-  );
-  const exact = rows.find((r) => slugify(r.author_name) === slug);
-  if (exact) return exact.author_id;
+  const authorSlugs = await getAuthorSlugMap(game);
+  for (const [authorId, authorSlug] of authorSlugs) {
+    if (authorSlug === slug) return authorId;
+  }
 
   // Same punctuation/whitespace-insensitive fallback as plugins -- "jin
   // jiyunsun" (a space, not the canonical hyphen) should still resolve.
   const target = normalizeSlug(slug);
   if (!target) return null;
-  return rows.find((r) => normalizeSlug(r.author_name) === target)?.author_id ?? null;
+  for (const [authorId, authorSlug] of authorSlugs) {
+    if (normalizeSlug(authorSlug) === target) return authorId;
+  }
+  return null;
 }
