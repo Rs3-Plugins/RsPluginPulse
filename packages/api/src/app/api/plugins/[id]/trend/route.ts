@@ -1,4 +1,4 @@
-import { getLatestSnapshotTime, getPlugin, getPluginTrend } from "@rspluginpulse/db";
+import { getLatestSnapshotTime, getPlugin, getPluginTrend, getPluginTrendRecent } from "@rspluginpulse/db";
 import { CACHE_CEILING, remember, rememberBriefly } from "@/lib/cache";
 import { jsonWithCors, OPTIONS as corsOptions } from "@/lib/cors";
 import { parseGame } from "@/lib/game";
@@ -6,17 +6,29 @@ import { resolvePlugin } from "@/lib/resolveEntity";
 
 export const OPTIONS = corsOptions;
 
+// "today"/"24h" zoom wants the raw ingest-cadence points, not
+// getPluginTrend's one-point-per-day forward-fill -- see
+// getPluginTrendRecent. Anything else (including no param) keeps the
+// existing daily series untouched.
+const RECENT_WINDOW_HOURS: Record<string, number> = { "24h": 24 };
+
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { searchParams } = new URL(request.url);
   const game = parseGame(searchParams.get("game"));
+  const window = searchParams.get("window");
 
   const freshness = (await rememberBriefly("freshness:global", () => getLatestSnapshotTime())) ?? "none";
   const result = await resolvePlugin(id, game, (pluginId) =>
-    remember(`plugin-trend:${pluginId}`, CACHE_CEILING.ENTITY, freshness, async () => {
+    remember(`plugin-trend:${pluginId}:${window ?? "daily"}`, CACHE_CEILING.ENTITY, freshness, async () => {
       const plugin = await getPlugin(pluginId);
       if (!plugin) return null;
-      const trend = await getPluginTrend(pluginId);
+      const trend =
+        window === "today"
+          ? await getPluginTrendRecent(pluginId, new Date().toISOString().slice(0, 10) + "T00:00:00.000Z")
+          : window && RECENT_WINDOW_HOURS[window]
+            ? await getPluginTrendRecent(pluginId, new Date(Date.now() - RECENT_WINDOW_HOURS[window] * 60 * 60_000).toISOString())
+            : await getPluginTrend(pluginId);
       return { pluginId, plugin, trend };
     }),
   );

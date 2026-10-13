@@ -851,6 +851,28 @@ export async function getPluginTrend(pluginId: number): Promise<PluginTrendPoint
   }));
 }
 
+// Raw, un-bucketed snapshots since `sinceIso` -- unlike getPluginTrend's
+// one-point-per-day forward-fill (built for 7d/30d/all zoom levels), the
+// "Today"/"24h" zoom wants every actual ingest-cadence point so same-day
+// movement is visible at all, not collapsed to a single dot.
+export async function getPluginTrendRecent(pluginId: number, sinceIso: string): Promise<PluginTrendPoint[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT captured_at, downloads_total, downloads_today, subscribers_total, date_updated
+     FROM plugin_snapshots
+     WHERE plugin_id = $1 AND captured_at >= $2
+     ORDER BY captured_at`,
+    [pluginId, sinceIso],
+  );
+  return rows.map((row) => ({
+    capturedAt: row.captured_at.toISOString(),
+    downloadsTotal: row.downloads_total,
+    downloadsToday: row.downloads_today,
+    subscribersTotal: row.subscribers_total,
+    dateUpdated: row.date_updated ? row.date_updated.toISOString() : null,
+  }));
+}
+
 function toPluginRow(row: any, authorSlugs: Map<number, string>): PluginLeaderboardRow {
   return {
     id: row.id,

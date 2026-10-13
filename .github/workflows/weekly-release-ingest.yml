@@ -1,4 +1,4 @@
-name: Weekly Release Ingest
+name: Weekly Plugin Version Ingest
 
 # Checks mod.io (runescape) and the RuneLite plugin-hub (runelite) for any
 # releases from roughly the last 9 days and upserts them into
@@ -22,6 +22,15 @@ on:
   schedule:
     - cron: "0 23 * * 0" # Sunday 23:00 UTC
   workflow_dispatch:
+    inputs:
+      # Lets this workflow's SSH + github.token plumbing double up for an
+      # on-demand run of backfill-releases.ts (the full historical walk)
+      # instead of the normal 9-day catch-up -- handy if a release ever
+      # needs to be re-backfilled.
+      backfill:
+        description: "Run the one-time full historical backfill (backfill-releases.ts) instead of the normal catch-up"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -33,7 +42,7 @@ concurrency:
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ inputs.backfill && 360 || 45 }}
 
     steps:
       - name: Configure SSH
@@ -67,20 +76,23 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
           GH_API_TOKEN: ${{ github.token }}
+          # See the `backfill` input above.
+          NPM_SCRIPT: ${{ inputs.backfill && 'backfill:releases' || 'ingest:releases' }}
         run: |
           set -euo pipefail
           # The remote command (before the heredoc) is a normal double-quoted
-          # string, so $GH_API_TOKEN expands here on the runner -- the
-          # heredoc body itself stays single-quoted/literal, same as before,
-          # so nothing else in it is touched.
-          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "PLUGIN_HUB_TOKEN='$GH_API_TOKEN' bash -s" <<'EOF'
+          # string, so $GH_API_TOKEN/$NPM_SCRIPT expand here on the runner --
+          # the heredoc body itself stays single-quoted/literal, same as
+          # before, so nothing else in it is touched.
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "PLUGIN_HUB_TOKEN='$GH_API_TOKEN' NPM_SCRIPT='$NPM_SCRIPT' bash -s" <<'EOF'
             set -uo pipefail
             cd /srv/rspluginpulse/current
-            npm run ingest:releases -w @rspluginpulse/ingest
+            set -a; source /srv/rspluginpulse/shared/.env; set +a
+            npm run "$NPM_SCRIPT" -w @rspluginpulse/ingest
             status=$?
             if [ "$status" -ne 0 ]; then
-              echo "::error::release ingest exited with status $status"
+              echo "::error::$NPM_SCRIPT exited with status $status"
               exit 1
             fi
-            echo "release ingest completed successfully"
+            echo "$NPM_SCRIPT completed successfully"
           EOF

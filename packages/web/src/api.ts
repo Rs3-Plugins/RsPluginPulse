@@ -299,9 +299,13 @@ export function getPluginInfo(id: string | number, game: Game = "runescape") {
 // `id` may be a numeric id (globally unique, no game needed) or a pretty
 // slug ("117hd") -- slugs are only unique per game, so `game` matters for
 // those. Always sent; the API ignores it for a numeric id.
-export function getPluginTrend(id: string | number, game: Game = "runescape") {
+//
+// `window` swaps the usual one-point-per-day series for raw, un-bucketed
+// ingest snapshots -- "today" (since 00:00 UTC) or "24h" (rolling last day)
+// -- used by the chart's Today/24h zoom buttons.
+export function getPluginTrend(id: string | number, game: Game = "runescape", window?: "today" | "24h") {
   return getJson<{ pluginId: number; plugin: PluginMeta; trend: PluginTrendPoint[] }>(
-    `/api/plugins/${encodeURIComponent(id)}/trend?game=${game}`,
+    `/api/plugins/${encodeURIComponent(id)}/trend?game=${game}${window ? `&window=${window}` : ""}`,
   );
 }
 
