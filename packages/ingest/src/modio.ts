@@ -1,4 +1,4 @@
-import type { IngestedMod } from "@rspluginpulse/db";
+import type { CoAuthorIngest, IngestedMod } from "@rspluginpulse/db";
 
 // RuneScape's mod.io game. api_access_options is 0 (no third-party API key
 // access), so this uses the same unauthenticated endpoint mod.io's own web
@@ -8,13 +8,18 @@ const API_BASE = "https://mod.io/v1";
 const PAGE_SIZE = 100;
 
 export async function fetchAllMods(): Promise<IngestedMod[]> {
-  const mods: IngestedMod[] = [];
+  const rawMods: any[] = [];
   for (let offset = 0; ; offset += PAGE_SIZE) {
     const page = await getModsPage(offset);
-    mods.push(...page.data.filter((m: any) => m.visible !== 0 && m.status === 1).map(toIngestedMod));
-    if (mods.length >= page.result_total || page.result_count === 0) break;
+    rawMods.push(...page.data.filter((m: any) => m.visible !== 0 && m.status === 1));
+    if (rawMods.length >= page.result_total || page.result_count === 0) break;
   }
-  return mods;
+  // mod.io's RuneScape catalog is small (a handful of mods, not the
+  // thousands RuneLite has), so one team-roster fetch per mod plus the
+  // list pages above is cheap enough to just run concurrently with no
+  // throttling.
+  const teams = await Promise.all(rawMods.map((mod) => fetchTeam(mod.id)));
+  return rawMods.map((mod, i) => toIngestedMod(mod, teams[i]));
 }
 
 async function getModsPage(offset: number): Promise<any> {
@@ -31,11 +36,42 @@ async function getModsPage(offset: number): Promise<any> {
   return response.json();
 }
 
-function toIngestedMod(mod: any): IngestedMod {
+// mod.io's single `submitted_by` field is only the original uploader --
+// mods can have a full team (co-creators, managers) with their own roster
+// endpoint, same idea as RuneLite's multi-person plugin credits.
+async function fetchTeam(modId: number): Promise<any[]> {
+  const url = `${API_BASE}/games/@${GAME_NAME_ID}/mods/${modId}/team`;
+  const response = await fetch(url, {
+    headers: { Accept: "application/json", "x-modio-origin": "web" },
+  });
+  if (!response.ok) {
+    throw new Error(`GET ${url} -> HTTP ${response.status}`);
+  }
+  const json = await response.json();
+  return json.data ?? [];
+}
+
+function toCoAuthor(member: any): CoAuthorIngest {
+  return {
+    authorId: member.user.id,
+    name: member.user.username,
+    avatarUrl: member.user.avatar?.thumb_100x100 ?? null,
+    profileUrl: member.user.profile_url ?? `https://mod.io/u/${member.user.name_id}`,
+  };
+}
+
+function toIngestedMod(mod: any, team: any[]): IngestedMod {
   const authorId = mod.submitted_by.id;
   const authorName = mod.submitted_by.username;
   const authorProfileUrl = mod.submitted_by.profile_url ?? `https://mod.io/u/${mod.submitted_by.name_id}`;
   const authorAvatarUrl = mod.submitted_by.avatar?.thumb_100x100 ?? null;
+  const primary: CoAuthorIngest = { authorId, name: authorName, avatarUrl: authorAvatarUrl, profileUrl: authorProfileUrl };
+
+  // The submitter normally appears first in their own team roster already
+  // (they created it), but don't rely on that -- always put them first and
+  // de-dupe the rest, same convention RuneLite's coAuthors list follows.
+  const rest = team.map(toCoAuthor).filter((co) => co.authorId !== authorId);
+  const coAuthors = [primary, ...rest];
 
   return {
     game: "runescape",
@@ -46,8 +82,7 @@ function toIngestedMod(mod: any): IngestedMod {
     authorName,
     authorProfileUrl,
     authorAvatarUrl,
-    // mod.io only ever has one submitter per mod.
-    coAuthors: [{ authorId, name: authorName, avatarUrl: authorAvatarUrl, profileUrl: authorProfileUrl }],
+    coAuthors,
     profileUrl: mod.profile_url ?? `https://mod.io/g/${GAME_NAME_ID}/m/${mod.name_id}`,
     tags: (mod.tags ?? []).map((t: any) => t.name),
     logoUrl: mod.logo?.thumb_640x360 ?? mod.logo?.thumb_320x180 ?? null,

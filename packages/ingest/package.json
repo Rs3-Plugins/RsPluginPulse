@@ -10,6 +10,7 @@
     "ingest:releases": "tsx src/run-release-ingest.ts",
     "fetch:phyce-dump": "tsx src/fetch-phyce-dump.ts",
     "import:phyce": "tsx src/import-phyce-dump.ts",
+    "find-gaps": "tsx src/find-gaps.ts",
     "backfill:releases": "tsx src/backfill-releases.ts"
   },
   "dependencies": {

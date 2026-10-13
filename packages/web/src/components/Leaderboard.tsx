@@ -247,6 +247,15 @@ export function Leaderboard() {
     return tagFilteredNewest.filter((p) => p.name.toLowerCase().includes(q) || p.authorName.toLowerCase().includes(q));
   }, [tagFilteredNewest, query]);
 
+  // Ranks reflect each row's position in the full (tag-filtered, un-searched)
+  // ordering, so a text search narrowing the list doesn't relabel a #50 plugin
+  // as #1 just because it's first among the matches.
+  const pluginRanks = useMemo(() => rankMap(tagFilteredPlugins, (p) => p.id), [tagFilteredPlugins]);
+  const authorRanks = useMemo(() => rankMap(authors, (a) => a.authorId), [authors]);
+  const growthRanks = useMemo(() => rankMap(fastestGrowing, (p) => p.id), [fastestGrowing]);
+  const growthAuthorRanks = useMemo(() => rankMap(growthAuthors, (a) => a.authorId), [growthAuthors]);
+  const newestRanks = useMemo(() => rankMap(tagFilteredNewest, (p) => p.id), [tagFilteredNewest]);
+
   const isGrowthAuthors = entity === "growth" && growthView === "authors";
 
   const totalUnfiltered =
@@ -435,83 +444,107 @@ export function Leaderboard() {
 
               {!showLoading &&
                 entity === "plugins" &&
-                pagePlugins?.map((row, i) => (
-                  <div key={row.id} className="row-grid" onClick={() => navigate(pluginHref(row.nameId, game))}>
-                    <span className={`cell-rank ${pageStart + i < 3 ? "top" : ""}`}>{pageStart + i + 1}</span>
-                    <Link to={pluginHref(row.nameId, game)} className="cell-name" onClick={(e) => e.stopPropagation()}>
-                      {row.name}
-                    </Link>
-                    <Link to={authorHref(row.authorNameId, game)} className="cell-sub" onClick={(e) => e.stopPropagation()}>
-                      {row.authorName}
-                    </Link>
-                    <span className="cell-value">{formatValue(row.value, period)}</span>
-                  </div>
-                ))}
+                pagePlugins?.map((row, i) => {
+                  const rank = pluginRanks.get(row.id) ?? pageStart + i + 1;
+                  return (
+                    <div key={row.id} className="row-grid" onClick={() => navigate(pluginHref(row.nameId, game))}>
+                      <span className={`cell-rank ${rank <= 3 ? "top" : ""}`}>{rank}</span>
+                      <Link to={pluginHref(row.nameId, game)} className="cell-name" onClick={(e) => e.stopPropagation()}>
+                        {row.name}
+                      </Link>
+                      <span className="cell-sub">
+                        <Link to={authorHref(row.authorNameId, game)} className="cell-sub-link" onClick={(e) => e.stopPropagation()}>
+                          {row.authorName}
+                        </Link>
+                        <CoAuthorBadge names={row.coAuthorNames} />
+                      </span>
+                      <span className="cell-value">{formatValue(row.value, period)}</span>
+                    </div>
+                  );
+                })}
 
               {!showLoading &&
                 entity === "authors" &&
-                pageAuthors?.map((row, i) => (
-                  <div key={row.authorId} className="row-grid" onClick={() => navigate(authorHref(row.nameId, game))}>
-                    <span className={`cell-rank ${pageStart + i < 3 ? "top" : ""}`}>{pageStart + i + 1}</span>
-                    <span className="cell-name">{row.authorName}</span>
-                    <span className="cell-sub">{row.pluginCount}</span>
-                    <span className="cell-value">{formatValue(row.value, period)}</span>
-                  </div>
-                ))}
+                pageAuthors?.map((row, i) => {
+                  const rank = authorRanks.get(row.authorId) ?? pageStart + i + 1;
+                  return (
+                    <div key={row.authorId} className="row-grid" onClick={() => navigate(authorHref(row.nameId, game))}>
+                      <span className={`cell-rank ${rank <= 3 ? "top" : ""}`}>{rank}</span>
+                      <span className="cell-name">{row.authorName}</span>
+                      <span className="cell-sub">{row.pluginCount}</span>
+                      <span className="cell-value">{formatValue(row.value, period)}</span>
+                    </div>
+                  );
+                })}
 
               {!showLoading &&
                 entity === "growth" &&
                 !isGrowthAuthors &&
-                pageGrowth?.map((row, i) => (
-                  <div
-                    key={row.id}
-                    className={`row-grid growth-cols ${game === "runelite" ? "single-metric" : ""}`}
-                    onClick={() => navigate(pluginHref(row.nameId, game))}
-                  >
-                    <span className={`cell-rank ${pageStart + i < 3 ? "top" : ""}`}>{pageStart + i + 1}</span>
-                    <Link to={pluginHref(row.nameId, game)} className="cell-name" onClick={(e) => e.stopPropagation()}>
-                      {row.name}
-                    </Link>
-                    <Link to={authorHref(row.authorNameId, game)} className="cell-sub" onClick={(e) => e.stopPropagation()}>
-                      {row.authorName}
-                    </Link>
-                    <MetricCell current={row.downloadsTotal} change={row.downloadsGain} />
-                    {game !== "runelite" && <MetricCell current={row.subscribersTotal} change={row.subscribersGain} />}
-                    <span className="cell-value">+{Math.round(row.downloadsGrowthPct)}%</span>
-                  </div>
-                ))}
+                pageGrowth?.map((row, i) => {
+                  const rank = growthRanks.get(row.id) ?? pageStart + i + 1;
+                  return (
+                    <div
+                      key={row.id}
+                      className={`row-grid growth-cols ${game === "runelite" ? "single-metric" : ""}`}
+                      onClick={() => navigate(pluginHref(row.nameId, game))}
+                    >
+                      <span className={`cell-rank ${rank <= 3 ? "top" : ""}`}>{rank}</span>
+                      <Link to={pluginHref(row.nameId, game)} className="cell-name" onClick={(e) => e.stopPropagation()}>
+                        {row.name}
+                      </Link>
+                      <span className="cell-sub">
+                        <Link to={authorHref(row.authorNameId, game)} className="cell-sub-link" onClick={(e) => e.stopPropagation()}>
+                          {row.authorName}
+                        </Link>
+                        <CoAuthorBadge names={row.coAuthorNames} />
+                      </span>
+                      <MetricCell current={row.downloadsTotal} change={row.downloadsGain} />
+                      {game !== "runelite" && <MetricCell current={row.subscribersTotal} change={row.subscribersGain} />}
+                      <span className="cell-value">+{Math.round(row.downloadsGrowthPct)}%</span>
+                    </div>
+                  );
+                })}
 
               {!showLoading &&
                 isGrowthAuthors &&
-                pageGrowthAuthors?.map((row, i) => (
-                  <div
-                    key={row.authorId}
-                    className={`row-grid growth-cols ${game === "runelite" ? "single-metric" : ""}`}
-                    onClick={() => navigate(authorHref(row.nameId, game))}
-                  >
-                    <span className={`cell-rank ${pageStart + i < 3 ? "top" : ""}`}>{pageStart + i + 1}</span>
-                    <span className="cell-name">{row.authorName}</span>
-                    <span className="cell-sub">{row.pluginCount}</span>
-                    <MetricCell current={row.downloadsTotal} change={row.downloadsGain} />
-                    {game !== "runelite" && <MetricCell current={row.subscribersTotal} change={row.subscribersGain} />}
-                    <span className="cell-value">+{Math.round(row.avgGrowthPct)}%</span>
-                  </div>
-                ))}
+                pageGrowthAuthors?.map((row, i) => {
+                  const rank = growthAuthorRanks.get(row.authorId) ?? pageStart + i + 1;
+                  return (
+                    <div
+                      key={row.authorId}
+                      className={`row-grid growth-cols ${game === "runelite" ? "single-metric" : ""}`}
+                      onClick={() => navigate(authorHref(row.nameId, game))}
+                    >
+                      <span className={`cell-rank ${rank <= 3 ? "top" : ""}`}>{rank}</span>
+                      <span className="cell-name">{row.authorName}</span>
+                      <span className="cell-sub">{row.pluginCount}</span>
+                      <MetricCell current={row.downloadsTotal} change={row.downloadsGain} />
+                      {game !== "runelite" && <MetricCell current={row.subscribersTotal} change={row.subscribersGain} />}
+                      <span className="cell-value">+{Math.round(row.avgGrowthPct)}%</span>
+                    </div>
+                  );
+                })}
 
               {!showLoading &&
                 entity === "new" &&
-                pageNewest?.map((row, i) => (
-                  <div key={row.id} className="row-grid" onClick={() => navigate(pluginHref(row.nameId, game))}>
-                    <span className={`cell-rank ${pageStart + i < 3 ? "top" : ""}`}>{pageStart + i + 1}</span>
-                    <Link to={pluginHref(row.nameId, game)} className="cell-name" onClick={(e) => e.stopPropagation()}>
-                      {row.name}
-                    </Link>
-                    <Link to={authorHref(row.authorNameId, game)} className="cell-sub" onClick={(e) => e.stopPropagation()}>
-                      {row.authorName}
-                    </Link>
-                    <span className="cell-value">{formatDate(row.dateAdded)}</span>
-                  </div>
-                ))}
+                pageNewest?.map((row, i) => {
+                  const rank = newestRanks.get(row.id) ?? pageStart + i + 1;
+                  return (
+                    <div key={row.id} className="row-grid" onClick={() => navigate(pluginHref(row.nameId, game))}>
+                      <span className={`cell-rank ${rank <= 3 ? "top" : ""}`}>{rank}</span>
+                      <Link to={pluginHref(row.nameId, game)} className="cell-name" onClick={(e) => e.stopPropagation()}>
+                        {row.name}
+                      </Link>
+                      <span className="cell-sub">
+                        <Link to={authorHref(row.authorNameId, game)} className="cell-sub-link" onClick={(e) => e.stopPropagation()}>
+                          {row.authorName}
+                        </Link>
+                        <CoAuthorBadge names={row.coAuthorNames} />
+                      </span>
+                      <span className="cell-value">{formatDate(row.dateAdded)}</span>
+                    </div>
+                  );
+                })}
             </div>
 
             {!showLoading && total > 0 && (
@@ -534,6 +567,12 @@ export function Leaderboard() {
       </div>
     </div>
   );
+}
+
+function rankMap<T, K>(rows: T[] | null, key: (row: T) => K): Map<K, number> {
+  const map = new Map<K, number>();
+  rows?.forEach((row, i) => map.set(key(row), i + 1));
+  return map;
 }
 
 function aggregateGrowthAuthors(plugins: FastestGrowingPlugin[]): GrowthAuthor[] {
@@ -587,6 +626,18 @@ function aggregateAuthors(plugins: PluginLeaderboardRow[]): AuthorLeaderboardRow
     }
   }
   return Array.from(byAuthor.values()).sort((a, b) => b.value - a.value);
+}
+
+// Only ~3.5% of plugins have more than one author, so the extras ride as a
+// compact "+N" badge next to the primary author's link rather than a full
+// name list that would blow out row height for the rare multi-author case.
+function CoAuthorBadge({ names }: { names: string[] }) {
+  if (names.length === 0) return null;
+  return (
+    <span className="cell-sub-extra pp-tip pp-tip--up" data-tooltip={`with ${names.join(", ")}`}>
+      +{names.length}
+    </span>
+  );
 }
 
 function MetricCell({ current, change }: { current: number; change: number }) {

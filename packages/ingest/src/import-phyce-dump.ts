@@ -3,9 +3,13 @@
 // this data -- see the PR/session notes. Two phases:
 //
 //   1. Import the dump: downsample its per-plugin install_counts history
-//      to one reading per (plugin, UTC day) -- the last reading of that
-//      day -- skipping today (the dump is always somewhat stale by the
-//      time you run this) and any day we already have a snapshot for.
+//      to one reading per (plugin, UTC hour) -- the last reading of that
+//      hour -- skipping today (the dump is always somewhat stale by the
+//      time you run this) and any hour we already have a snapshot for.
+//      Hour-level (not day-level) so this also backfills a plugin that's
+//      missing a handful of hours inside a day that otherwise has
+//      coverage -- a whole-day gap just ends up filling all 24 of its
+//      hours instead of one.
 //   2. Catch up today: a dump is only ever current as of whenever it was
 //      generated, so phase 2 asks phyce's own /plugins endpoint (one
 //      request, current state for every plugin -- NOT the per-plugin
@@ -19,7 +23,7 @@
 //
 // Only use this occasionally (whenever phyce hands over a fresh dump) --
 // phase 2 is a single lightweight request, but re-running phase 1 against
-// the same dump repeatedly is pointless (it only ever adds days you don't
+// the same dump repeatedly is pointless (it only ever adds hours you don't
 // already have).
 import fs from "fs";
 import readline from "readline";
@@ -179,14 +183,15 @@ async function main() {
 
   const ourIds = Array.from(new Set(phyceIdToOurId.values()));
   const { rows: existingRows } = await pool.query(
-    `SELECT plugin_id, (captured_at AT TIME ZONE 'UTC')::date AS day FROM plugin_snapshots WHERE plugin_id = ANY($1)`,
+    `SELECT plugin_id, to_char(date_trunc('hour', captured_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24') AS hour
+     FROM plugin_snapshots WHERE plugin_id = ANY($1)`,
     [ourIds],
   );
-  const existingDays = new Set(existingRows.map((r) => `${r.plugin_id}|${r.day.toISOString().slice(0, 10)}`));
-  console.log(`  ${existingDays.size} (plugin, day) pairs already covered -- these will be skipped`);
+  const existingHours = new Set(existingRows.map((r) => `${r.plugin_id}|${r.hour}`));
+  console.log(`  ${existingHours.size} (plugin, hour) pairs already covered -- these will be skipped`);
 
   const today = new Date().toISOString().slice(0, 10);
-  const lastOfDay = new Map<string, { pluginId: number; capturedAt: string; count: number }>();
+  const lastOfHour = new Map<string, { pluginId: number; capturedAt: string; count: number }>();
 
   console.log("streaming the dump's plugin_installs rows (this is the slow part -- a 2-3GB dump takes a few minutes)...");
   let lineCount = 0;
@@ -204,15 +209,16 @@ async function main() {
     if (ourId === undefined) continue;
     if (day === today) continue;
     matchedCount++;
-    const key = `${ourId}|${day}`;
-    if (existingDays.has(key)) continue;
-    lastOfDay.set(key, { pluginId: ourId, capturedAt: `${day}T${time}Z`, count });
-    if (lineCount % 5_000_000 === 0) console.log(`  ...${lineCount.toLocaleString()} lines scanned, ${lastOfDay.size.toLocaleString()} pending`);
+    const hour = time.slice(0, 2);
+    const key = `${ourId}|${day}T${hour}`;
+    if (existingHours.has(key)) continue;
+    lastOfHour.set(key, { pluginId: ourId, capturedAt: `${day}T${time}Z`, count });
+    if (lineCount % 5_000_000 === 0) console.log(`  ...${lineCount.toLocaleString()} lines scanned, ${lastOfHour.size.toLocaleString()} pending`);
   }
   console.log(`  scanned ${lineCount.toLocaleString()} lines, ${matchedCount.toLocaleString()} matched our catalog`);
 
-  const toInsert = Array.from(lastOfDay.values());
-  console.log(`inserting ${toInsert.length.toLocaleString()} candidate (plugin, day) snapshots from the dump...`);
+  const toInsert = Array.from(lastOfHour.values());
+  console.log(`inserting ${toInsert.length.toLocaleString()} candidate (plugin, hour) snapshots from the dump...`);
   const inserted = await insertRows(pool, toInsert);
   console.log(`  done, ${inserted.toLocaleString()} were actually new (the rest already existed)`);
 

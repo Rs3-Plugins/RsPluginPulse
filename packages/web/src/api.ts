@@ -13,6 +13,7 @@ export interface PluginLeaderboardRow {
   profileUrl: string;
   tags: string[];
   value: number;
+  coAuthorNames: string[];
 }
 
 export interface AuthorLeaderboardRow {
@@ -61,6 +62,7 @@ export interface FastestGrowingPlugin {
   subscribersGain: number;
   downloadsGrowthPct: number;
   growthScore: number;
+  coAuthorNames: string[];
 }
 
 export interface PluginTrendPoint {
@@ -165,6 +167,7 @@ export interface NewestPluginRow {
   logoUrl: string | null;
   dateAdded: string;
   downloadsTotal: number;
+  coAuthorNames: string[];
 }
 
 export interface SiteStats {

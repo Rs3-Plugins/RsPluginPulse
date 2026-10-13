@@ -11,6 +11,10 @@ export interface PluginLeaderboardRow {
   profileUrl: string;
   tags: string[];
   value: number;
+  // Names of co-authors beyond the primary one above (plugin_authors
+  // position >= 1) -- empty for the vast majority of plugins, which have
+  // exactly one author.
+  coAuthorNames: string[];
 }
 
 export interface AuthorLeaderboardRow {
@@ -57,6 +61,7 @@ export interface NewestPluginRow {
   logoUrl: string | null;
   dateAdded: string;
   downloadsTotal: number;
+  coAuthorNames: string[];
 }
 
 export interface SiteStats {
@@ -81,6 +86,7 @@ export interface FastestGrowingPlugin {
   subscribersGain: number;
   downloadsGrowthPct: number;
   growthScore: number;
+  coAuthorNames: string[];
 }
 
 export interface PluginTrendPoint {

@@ -242,11 +242,11 @@ export function PluginTrend() {
   // gauge is the change since ~24h ago instead, same basis findPointNear
   // already uses for the other tiles' "gained" sub-labels. Display-only,
   // not a selectable chart metric (there's no "change" series to plot).
-  const todayChange = plugin.game === "runelite" ? last.downloadsTotal - findPointNear(points, 1).downloadsTotal : null;
+  const todayChange = plugin.game === "runelite" ? smoothedGain(points, 1) : null;
   // Same idea as todayChange, just over 30 days -- a monthly figure that
   // actually means something for a live gauge, unlike subscribersTotal
   // (which used to sit here as a redundant duplicate of Total installs).
-  const monthlyChange = plugin.game === "runelite" ? last.downloadsTotal - findPointNear(points, 30).downloadsTotal : null;
+  const monthlyChange = plugin.game === "runelite" ? smoothedGain(points, 30) : null;
   const compareIds = [plugin.id, ...(hotPlugins ?? []).filter((p) => p.id !== plugin.id).slice(0, 2).map((p) => p.id)];
   const compact = plugin.game === "runelite";
   const authorEntries = plugin.coAuthors;
@@ -533,7 +533,7 @@ function tileValueAndSub(points: PluginTrendPoint[], metric: TrendMetric): { sub
   const last = points[points.length - 1];
 
   if (metric === "downloadsTotal") {
-    const gain = last.downloadsTotal - findPointNear(points, 7).downloadsTotal;
+    const gain = smoothedGain(points, 7);
     return { sub: `${gain >= 0 ? "+" : ""}${gain.toLocaleString()} this week` };
   }
   if (metric === "downloadsToday") {
@@ -551,5 +551,41 @@ function findPointNear(points: PluginTrendPoint[], daysAgo: number): PluginTrend
     if (new Date(p.capturedAt).getTime() <= cutoff) candidate = p;
   }
   return candidate ?? points[0];
+}
+
+// RuneLite's downloadsTotal is a live "currently reporting installs" gauge,
+// not a cumulative counter (see runelite.ts), so a single day's reading
+// drifts up and down with no real trend. Diffing findPointNear's single
+// point against `last` picks up that noise as if it were growth/decline --
+// for small plugins that noise dominates, showing a meaningless +/-1. See
+// gainWindowDays in @rspluginpulse/db's queries.ts for the same fix applied
+// to the leaderboard figures; this mirrors it using the daily points this
+// page already has loaded, instead of re-querying the server.
+function gainWindowDays(cutoffDays: number): number {
+  return Math.min(cutoffDays / 4, 3);
+}
+
+function averageNear(points: PluginTrendPoint[], daysAgo: number, windowDays: number): number {
+  const center = Date.now() - daysAgo * 24 * 60 * 60 * 1000;
+  const lo = center - windowDays * 24 * 60 * 60 * 1000;
+  const hi = center + windowDays * 24 * 60 * 60 * 1000;
+  const inWindow = points.filter((p) => {
+    const t = new Date(p.capturedAt).getTime();
+    return t >= lo && t <= hi;
+  });
+  if (inWindow.length === 0) return findPointNear(points, daysAgo).downloadsTotal;
+  return inWindow.reduce((sum, p) => sum + p.downloadsTotal, 0) / inWindow.length;
+}
+
+function averageTrailing(points: PluginTrendPoint[], windowDays: number): number {
+  const cutoff = Date.now() - windowDays * 24 * 60 * 60 * 1000;
+  const inWindow = points.filter((p) => new Date(p.capturedAt).getTime() >= cutoff);
+  if (inWindow.length === 0) return points[points.length - 1]?.downloadsTotal ?? 0;
+  return inWindow.reduce((sum, p) => sum + p.downloadsTotal, 0) / inWindow.length;
+}
+
+function smoothedGain(points: PluginTrendPoint[], cutoffDays: number): number {
+  const windowDays = gainWindowDays(cutoffDays);
+  return Math.round(averageTrailing(points, windowDays) - averageNear(points, cutoffDays, windowDays));
 }
 

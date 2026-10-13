@@ -3130,10 +3130,28 @@ button.metric-tile:not(.active):hover {
 }
 
 .cell-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   color: var(--muted);
+}
+
+.cell-sub-link {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+}
+
+.cell-sub-extra {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: var(--surface2);
+  color: var(--dim);
 }
 
 .cell-value {

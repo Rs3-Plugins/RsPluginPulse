@@ -210,11 +210,12 @@ async function getAuthorSlugMap(game: string): Promise<Map<number, string>> {
 export async function getNewestPlugins(limit = 50, game = "runescape"): Promise<NewestPluginRow[]> {
   const pool = getPool();
   const { rows } = await pool.query(
-    `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.profile_url, p.tags, p.logo_url, p.date_added, l.downloads_total
+    `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.profile_url, p.tags, p.logo_url, p.date_added, l.downloads_total, ${CO_AUTHOR_NAMES_SELECT}
      FROM plugins p
      JOIN LATERAL (
        SELECT downloads_total FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
      ) l ON true
+     ${CO_AUTHOR_NAMES_JOIN}
      WHERE p.game = $2
      ORDER BY p.date_added DESC
      LIMIT $1`,
@@ -233,6 +234,7 @@ export async function getNewestPlugins(limit = 50, game = "runescape"): Promise<
     logoUrl: row.logo_url,
     dateAdded: row.date_added.toISOString(),
     downloadsTotal: Number(row.downloads_total),
+    coAuthorNames: row.co_author_names ?? [],
   }));
 }
 
@@ -351,15 +353,43 @@ export async function upsertPluginsAndSnapshot(mods: IngestedMod[], capturedAt: 
 // pulled in as a dependency rather than installed for their own sake.
 const LEADERBOARD_EXCLUDED_TAG = "Library for other Plugins";
 
+// RuneLite's downloads_total is a live "currently reporting installs" gauge,
+// not a cumulative counter (see ingest/runelite.ts), so it naturally drifts
+// up and down hour to hour. Diffing two single snapshots picks up that
+// hour-of-day/day-of-week noise as if it were real growth or decline --
+// for small plugins (most of the catalog) that noise dwarfs the signal, so
+// roughly half of them show a meaningless +/-1 "gain". Averaging a window
+// of snapshots around each comparison endpoint cancels most of that out.
+// Harmless for mod.io's monotonic cumulative downloads too, where it just
+// nudges both endpoints down slightly without changing the sign of the gain.
+// Window scales with the cutoff -- a 1-day "hot" diff can't average over
+// multiple days, while a 30-day diff can afford a few -- capped so it never
+// eats into the period being measured.
+function gainWindowDays(cutoffDays: number): number {
+  return Math.min(cutoffDays / 4, 3);
+}
+
+// Co-authors beyond the primary (plugin_authors position 0), for the
+// leaderboard's "+N" badge. Aggregated here so every leaderboard query
+// stays a single round trip regardless of catalog size, rather than a
+// per-plugin fetch -- most plugins have no rows past position 0 anyway.
+const CO_AUTHOR_NAMES_JOIN = `
+     LEFT JOIN LATERAL (
+       SELECT array_agg(author_name ORDER BY position) AS names
+       FROM plugin_authors pa WHERE pa.plugin_id = p.id AND pa.position >= 1
+     ) co ON true`;
+const CO_AUTHOR_NAMES_SELECT = "COALESCE(co.names, ARRAY[]::text[]) AS co_author_names";
+
 // Latest snapshot per plugin, ordered by the requested metric.
 async function topPluginsByLatestMetric(metric: "downloads_total" | "downloads_today", game: string, limit: number): Promise<PluginLeaderboardRow[]> {
   const pool = getPool();
   const { rows } = await pool.query(
-    `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.author_avatar_url, p.profile_url, p.tags, l.${metric} AS value
+    `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.author_avatar_url, p.profile_url, p.tags, l.${metric} AS value, ${CO_AUTHOR_NAMES_SELECT}
      FROM plugins p
      JOIN LATERAL (
        SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
      ) l ON true
+     ${CO_AUTHOR_NAMES_JOIN}
      WHERE p.game = $3 AND NOT ($2 = ANY(p.tags))
      ORDER BY value DESC
      LIMIT $1`,
@@ -374,24 +404,32 @@ async function topPluginsByLatestMetric(metric: "downloads_total" | "downloads_t
 // than `cutoffDays` of history exists yet.
 async function topPluginsByGain(cutoffDays: number, game: string, limit: number): Promise<PluginLeaderboardRow[]> {
   const pool = getPool();
+  const windowDays = gainWindowDays(cutoffDays);
   const { rows } = await pool.query(
     `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.author_avatar_url, p.profile_url, p.tags,
-            l.downloads_total - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total) AS value
+            ROUND(COALESCE(nowavg.downloads_total, l.downloads_total) - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total)) AS value,
+            ${CO_AUTHOR_NAMES_SELECT}
      FROM plugins p
      JOIN LATERAL (
        SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
      ) l ON true
      LEFT JOIN LATERAL (
-       SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at <= now() - ($2 * interval '1 day')
-       ORDER BY s.captured_at DESC LIMIT 1
+       SELECT avg(downloads_total) AS downloads_total
+       FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at >= now() - ($5 * interval '1 day')
+     ) nowavg ON true
+     LEFT JOIN LATERAL (
+       SELECT avg(downloads_total) AS downloads_total
+       FROM plugin_snapshots s WHERE s.plugin_id = p.id
+         AND s.captured_at BETWEEN now() - (($2 + $5) * interval '1 day') AND now() - (($2 - $5) * interval '1 day')
      ) b1 ON true
      LEFT JOIN LATERAL (
        SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at ASC LIMIT 1
      ) b2 ON true
+     ${CO_AUTHOR_NAMES_JOIN}
      WHERE p.game = $4 AND NOT ($3 = ANY(p.tags))
      ORDER BY value DESC
      LIMIT $1`,
-    [limit, cutoffDays, LEADERBOARD_EXCLUDED_TAG, game],
+    [limit, cutoffDays, LEADERBOARD_EXCLUDED_TAG, game, windowDays],
   );
   const authorSlugs = await getAuthorSlugMap(game);
   return rows.map((row) => toPluginRow(row, authorSlugs));
@@ -404,18 +442,46 @@ async function topPluginsByGain(cutoffDays: number, game: string, limit: number)
 export async function getPluginRanks(pluginIds: number[], metric: "alltime" | "hot", game = "runescape"): Promise<Map<number, number>> {
   if (pluginIds.length === 0) return new Map();
   const pool = getPool();
-  const column = metric === "hot" ? "downloads_today" : "downloads_total";
+  // RuneLite's plugin-hub exposes only a live install gauge, not a true daily
+  // download counter (downloadsToday is hardcoded to 0 in ingest/runelite.ts),
+  // so every RuneLite plugin ties at 0 and RANK() hands out rank 1 to all of
+  // them. Approximate "hot" the same way weekly/monthly already do: diff the
+  // gauge against ~1 day ago.
+  const isHotGain = metric === "hot" && game === "runelite";
+  const windowDays = gainWindowDays(1);
+  const valueSql =
+    metric === "alltime"
+      ? "l.downloads_total"
+      : isHotGain
+        ? "COALESCE(nowavg.downloads_total, l.downloads_total) - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total)"
+        : "l.downloads_today";
   const { rows } = await pool.query(
     `WITH ranked AS (
-       SELECT p.id, RANK() OVER (ORDER BY l.${column} DESC) AS rank
+       SELECT p.id, RANK() OVER (ORDER BY ${valueSql} DESC) AS rank
        FROM plugins p
        JOIN LATERAL (
-         SELECT ${column} FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
+         SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
        ) l ON true
+       ${
+         isHotGain
+           ? `LEFT JOIN LATERAL (
+                SELECT avg(downloads_total) AS downloads_total
+                FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at >= now() - ($4 * interval '1 day')
+              ) nowavg ON true
+              LEFT JOIN LATERAL (
+                SELECT avg(downloads_total) AS downloads_total
+                FROM plugin_snapshots s WHERE s.plugin_id = p.id
+                  AND s.captured_at BETWEEN now() - ((1 + $4) * interval '1 day') AND now() - ((1 - $4) * interval '1 day')
+              ) b1 ON true
+              LEFT JOIN LATERAL (
+                SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at ASC LIMIT 1
+              ) b2 ON true`
+           : ""
+       }
        WHERE p.game = $2 AND NOT ($3 = ANY(p.tags))
      )
      SELECT id, rank FROM ranked WHERE id = ANY($1::int[])`,
-    [pluginIds, game, LEADERBOARD_EXCLUDED_TAG],
+    isHotGain ? [pluginIds, game, LEADERBOARD_EXCLUDED_TAG, windowDays] : [pluginIds, game, LEADERBOARD_EXCLUDED_TAG],
   );
   return new Map(rows.map((row) => [row.id, Number(row.rank)]));
 }
@@ -426,36 +492,44 @@ export async function getPluginRanks(pluginIds: number[], metric: "alltime" | "h
 // plugins with a near-zero baseline don't produce absurd percentages.
 export async function getFastestGrowingPlugins(limit = 5, cutoffDays = 7, game = "runescape"): Promise<FastestGrowingPlugin[]> {
   const pool = getPool();
+  const windowDays = gainWindowDays(cutoffDays);
   const { rows } = await pool.query(
     `SELECT p.id, p.name_id, p.name, p.author_id, p.author_name, p.profile_url,
             l.downloads_total AS downloads_total,
             l.subscribers_total AS subscribers_total,
-            (l.downloads_total - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total)) AS downloads_gain,
-            (l.subscribers_total - COALESCE(b1.subscribers_total, b2.subscribers_total, l.subscribers_total)) AS subscribers_gain,
-            (l.downloads_total - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total))::float
+            ROUND(COALESCE(nowavg.downloads_total, l.downloads_total) - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total)) AS downloads_gain,
+            ROUND(COALESCE(nowavg.subscribers_total, l.subscribers_total) - COALESCE(b1.subscribers_total, b2.subscribers_total, l.subscribers_total)) AS subscribers_gain,
+            (COALESCE(nowavg.downloads_total, l.downloads_total) - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total))::float
               / GREATEST(COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total), 1) * 100 AS downloads_growth_pct,
             (
-              (l.downloads_total - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total))::float
+              (COALESCE(nowavg.downloads_total, l.downloads_total) - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total))::float
                 / GREATEST(COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total), 20)
               +
-              (l.subscribers_total - COALESCE(b1.subscribers_total, b2.subscribers_total, l.subscribers_total))::float
+              (COALESCE(nowavg.subscribers_total, l.subscribers_total) - COALESCE(b1.subscribers_total, b2.subscribers_total, l.subscribers_total))::float
                 / GREATEST(COALESCE(b1.subscribers_total, b2.subscribers_total, l.subscribers_total), 10)
-            ) AS growth_score
+            ) AS growth_score,
+            ${CO_AUTHOR_NAMES_SELECT}
      FROM plugins p
      JOIN LATERAL (
        SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
      ) l ON true
      LEFT JOIN LATERAL (
-       SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at <= now() - ($2 * interval '1 day')
-       ORDER BY s.captured_at DESC LIMIT 1
+       SELECT avg(downloads_total) AS downloads_total, avg(subscribers_total) AS subscribers_total
+       FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at >= now() - ($5 * interval '1 day')
+     ) nowavg ON true
+     LEFT JOIN LATERAL (
+       SELECT avg(downloads_total) AS downloads_total, avg(subscribers_total) AS subscribers_total
+       FROM plugin_snapshots s WHERE s.plugin_id = p.id
+         AND s.captured_at BETWEEN now() - (($2 + $5) * interval '1 day') AND now() - (($2 - $5) * interval '1 day')
      ) b1 ON true
      LEFT JOIN LATERAL (
        SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at ASC LIMIT 1
      ) b2 ON true
+     ${CO_AUTHOR_NAMES_JOIN}
      WHERE p.game = $4 AND NOT ($3 = ANY(p.tags))
      ORDER BY growth_score DESC
      LIMIT $1`,
-    [limit, cutoffDays, LEADERBOARD_EXCLUDED_TAG, game],
+    [limit, cutoffDays, LEADERBOARD_EXCLUDED_TAG, game, windowDays],
   );
   const authorSlugs = await getAuthorSlugMap(game);
   return rows
@@ -469,6 +543,7 @@ export async function getFastestGrowingPlugins(limit = 5, cutoffDays = 7, game =
       profileUrl: row.profile_url,
       downloadsTotal: Number(row.downloads_total),
       subscribersTotal: Number(row.subscribers_total),
+      coAuthorNames: row.co_author_names ?? [],
       downloadsGain: Number(row.downloads_gain),
       subscribersGain: Number(row.subscribers_gain),
       downloadsGrowthPct: Number(row.downloads_growth_pct),
@@ -479,7 +554,13 @@ export async function getFastestGrowingPlugins(limit = 5, cutoffDays = 7, game =
 
 export async function getTopPlugins(period: Period, limit = 50, game = "runescape"): Promise<PluginLeaderboardRow[]> {
   if (period === "alltime") return topPluginsByLatestMetric("downloads_total", game, limit);
-  if (period === "hot") return topPluginsByLatestMetric("downloads_today", game, limit);
+  if (period === "hot") {
+    // RuneLite has no real daily download counter (see getPluginRanks), so
+    // approximate "today" as a 1-day gain on the live install gauge instead
+    // of the always-zero downloads_today column.
+    if (game === "runelite") return topPluginsByGain(1, game, limit);
+    return topPluginsByLatestMetric("downloads_today", game, limit);
+  }
   if (period === "weekly") return topPluginsByGain(7, game, limit);
   return topPluginsByGain(30, game, limit);
 }
@@ -519,14 +600,19 @@ export async function getAuthorRanks(authorIds: number[], period: Period, game =
   if (authorIds.length === 0) return new Map();
   const pool = getPool();
 
+  // RuneLite has no real daily download counter (see getPluginRanks), so its
+  // "hot" period rides the same gain-diff path as weekly/monthly, just with
+  // a 1-day cutoff instead of a flat (always-zero) downloads_today column.
+  const isHotGain = period === "hot" && game === "runelite";
+  const needsGainJoins = period === "weekly" || period === "monthly" || isHotGain;
   const valueSql =
-    period === "hot"
-      ? "l.downloads_today"
-      : period === "alltime"
-        ? "l.downloads_total"
-        : "l.downloads_total - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total)";
-  const cutoffDays = period === "monthly" ? 30 : 7;
-  const needsGainJoins = period === "weekly" || period === "monthly";
+    period === "alltime"
+      ? "l.downloads_total"
+      : needsGainJoins
+        ? "COALESCE(nowavg.downloads_total, l.downloads_total) - COALESCE(b1.downloads_total, b2.downloads_total, l.downloads_total)"
+        : "l.downloads_today";
+  const cutoffDays = period === "monthly" ? 30 : isHotGain ? 1 : 7;
+  const windowDays = gainWindowDays(cutoffDays);
 
   const { rows } = await pool.query(
     `WITH per_author AS (
@@ -538,8 +624,13 @@ export async function getAuthorRanks(authorIds: number[], period: Period, game =
        ${
          needsGainJoins
            ? `LEFT JOIN LATERAL (
-                SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at <= now() - ($4 * interval '1 day')
-                ORDER BY s.captured_at DESC LIMIT 1
+                SELECT avg(downloads_total) AS downloads_total
+                FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at >= now() - ($5 * interval '1 day')
+              ) nowavg ON true
+              LEFT JOIN LATERAL (
+                SELECT avg(downloads_total) AS downloads_total
+                FROM plugin_snapshots s WHERE s.plugin_id = p.id
+                  AND s.captured_at BETWEEN now() - (($4 + $5) * interval '1 day') AND now() - (($4 - $5) * interval '1 day')
               ) b1 ON true
               LEFT JOIN LATERAL (
                 SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at ASC LIMIT 1
@@ -553,7 +644,7 @@ export async function getAuthorRanks(authorIds: number[], period: Period, game =
        SELECT author_id, RANK() OVER (ORDER BY value DESC) AS rank FROM per_author
      )
      SELECT author_id, rank FROM ranked WHERE author_id = ANY($1::int[])`,
-    needsGainJoins ? [authorIds, game, LEADERBOARD_EXCLUDED_TAG, cutoffDays] : [authorIds, game, LEADERBOARD_EXCLUDED_TAG],
+    needsGainJoins ? [authorIds, game, LEADERBOARD_EXCLUDED_TAG, cutoffDays, windowDays] : [authorIds, game, LEADERBOARD_EXCLUDED_TAG],
   );
   return new Map(rows.map((row) => [row.author_id, Number(row.rank)]));
 }
@@ -885,6 +976,7 @@ function toPluginRow(row: any, authorSlugs: Map<number, string>): PluginLeaderbo
     profileUrl: row.profile_url,
     tags: row.tags ?? [],
     value: Number(row.value),
+    coAuthorNames: row.co_author_names ?? [],
   };
 }
 
