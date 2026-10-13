@@ -1,0 +1,76 @@
+name: Weekly Wiki Game Updates
+
+# Scrapes the RuneScape/OSRS wikis' Category:Game updates listings and
+# upserts anything new into game_updates, so trend-chart spikes/crashes can
+# be annotated with the official news post that likely caused them. Runs
+# straight over SSH as a one-shot command (not via a systemd timer like the
+# hourly mod.io/RuneLite ingest) since this only needs to run a couple of
+# times a week -- see packages/ingest/src/run-wiki-updates.ts.
+#
+# Each wiki's own weekly update lands on a different day (RS3: Mondays
+# ~11:00-12:00 Game Time/UTC; OSRS: Wednesdays ~11:30 UTC), so this fires
+# the same afternoon as each one -- 17:00 UTC gives the wiki editors a few
+# hours to publish the write-up before it's scraped. The script always
+# fetches both wikis regardless of which day triggered it (upserts are
+# idempotent, so re-checking the other wiki is a harmless no-op) -- that
+# way a late write-up on either wiki still gets picked up on the next run
+# instead of being missed until the following week.
+on:
+  schedule:
+    - cron: "0 17 * * 1" # Monday 17:00 UTC -- after RS3's weekly update
+    - cron: "0 17 * * 3" # Wednesday 17:00 UTC -- after OSRS's weekly update
+  workflow_dispatch:
+
+concurrency:
+  group: weekly-wiki-updates
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          echo "scanning $SSH_HOST port $SSH_PORT ..."
+          ssh-keyscan -T 10 -p "$SSH_PORT" "$SSH_HOST" > /tmp/scanned 2>/tmp/scanerr || true
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          elif [ -s /tmp/scanned ]; then
+            echo "::warning::SSH_KNOWN_HOSTS not set — trusting the key seen now"
+            cp /tmp/scanned ~/.ssh/known_hosts
+          else
+            echo "::error::could not reach $SSH_HOST:$SSH_PORT to read its host key"
+            exit 1
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Run wiki-updates ingest on the server
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
+        run: |
+          set -euo pipefail
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" bash -s <<'EOF'
+            set -uo pipefail
+            cd /srv/rspluginpulse/current
+            npm run ingest:wiki-updates -w @rspluginpulse/ingest
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              echo "::error::wiki-updates ingest exited with status $status"
+              exit 1
+            fi
+            echo "wiki-updates ingest completed successfully"
+          EOF

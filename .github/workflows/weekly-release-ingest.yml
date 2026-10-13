@@ -1,0 +1,86 @@
+name: Weekly Release Ingest
+
+# Checks mod.io (runescape) and the RuneLite plugin-hub (runelite) for any
+# releases from roughly the last 9 days and upserts them into
+# plugin_releases, so trend-chart Release/Update markers stay current
+# without re-running the full one-time backfill (see
+# packages/ingest/src/backfill-releases.ts for that, and run-release-ingest.ts
+# for this recurring form). Runs straight over SSH as a one-shot command,
+# same pattern as weekly-wiki-updates.yml.
+#
+# Sunday night (23:00 UTC) -- after both games' own weekly update cadence
+# has already landed for the week, so this week's releases are in by then.
+#
+# The plugin-hub side needs an authenticated GitHub API call per RuneLite
+# plugin to avoid the 60/hour unauthenticated rate limit. Rather than a
+# long-lived personal access token sitting in the server's .env, this uses
+# the token every Actions run already gets for free (github.token) -- it's
+# good for reading any public repo's data (not just this one) at the
+# authenticated 5,000/hour rate, and only lives for the duration of this
+# one job.
+on:
+  schedule:
+    - cron: "0 23 * * 0" # Sunday 23:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-release-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          echo "scanning $SSH_HOST port $SSH_PORT ..."
+          ssh-keyscan -T 10 -p "$SSH_PORT" "$SSH_HOST" > /tmp/scanned 2>/tmp/scanerr || true
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          elif [ -s /tmp/scanned ]; then
+            echo "::warning::SSH_KNOWN_HOSTS not set — trusting the key seen now"
+            cp /tmp/scanned ~/.ssh/known_hosts
+          else
+            echo "::error::could not reach $SSH_HOST:$SSH_PORT to read its host key"
+            exit 1
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Run release ingest on the server
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The remote command (before the heredoc) is a normal double-quoted
+          # string, so $GH_API_TOKEN expands here on the runner -- the
+          # heredoc body itself stays single-quoted/literal, same as before,
+          # so nothing else in it is touched.
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "PLUGIN_HUB_TOKEN='$GH_API_TOKEN' bash -s" <<'EOF'
+            set -uo pipefail
+            cd /srv/rspluginpulse/current
+            npm run ingest:releases -w @rspluginpulse/ingest
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              echo "::error::release ingest exited with status $status"
+              exit 1
+            fi
+            echo "release ingest completed successfully"
+          EOF

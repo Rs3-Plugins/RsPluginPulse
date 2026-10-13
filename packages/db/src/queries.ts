@@ -2,6 +2,7 @@ import { randomBytes } from "crypto";
 import { getPool } from "./client";
 import { normalizeSlug, slugify } from "./slug";
 import type {
+  AnnotationGameKey,
   AuthorLeaderboardRow,
   AuthorProfile,
   CategoryStat,
@@ -16,15 +17,21 @@ import type {
   EmbedCardOptions,
   EmbedCardType,
   FastestGrowingPlugin,
+  GameUpdate,
+  GameUpdateInput,
   GrowthSparkRow,
   IngestedMod,
   NewestPluginRow,
   NewReleaseRow,
   Period,
   PluginLeaderboardRow,
+  PluginRelease,
+  PluginReleaseInput,
   PluginTrendPoint,
   SearchResult,
   SiteStats,
+  SpecialEvent,
+  SpecialEventInput,
   StatsOverview,
 } from "./types";
 
@@ -168,6 +175,35 @@ export async function getRandomPluginId(game = "runescape"): Promise<{ id: numbe
   return { id: rows[0].id, nameId: rows[0].name_id };
 }
 
+// Authors have no slug of their own upstream (see schema.sql), so every
+// nameId handed out here is derived from author_name via slugify(). Two
+// authors can collide on that derived slug -- most commonly non-Latin
+// names, which slugify() strips down to "" since it only keeps [a-z0-9] --
+// so collisions are resolved by suffixing -2, -3... onto every name after
+// the first, in author_id order (lowest id keeps the bare slug). Ordering
+// by author_id rather than query order keeps the assignment stable across
+// calls instead of depending on incidental row order.
+async function getAuthorSlugMap(game: string): Promise<Map<number, string>> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT DISTINCT pa.author_id, pa.author_name
+     FROM plugin_authors pa
+     JOIN plugins p ON p.id = pa.plugin_id
+     WHERE p.game = $1
+     ORDER BY pa.author_id ASC`,
+    [game],
+  );
+  const seen = new Map<string, number>();
+  const map = new Map<number, string>();
+  for (const row of rows) {
+    const base = slugify(row.author_name) || "author";
+    const count = (seen.get(base) ?? 0) + 1;
+    seen.set(base, count);
+    map.set(row.author_id, count === 1 ? base : `${base}-${count}`);
+  }
+  return map;
+}
+
 // Newest plugins first -- unlike the leaderboards, this intentionally
 // includes everything (no library-tag exclusion) since it's about
 // discoverability, not ranking fairness.
@@ -184,13 +220,14 @@ export async function getNewestPlugins(limit = 50, game = "runescape"): Promise<
      LIMIT $1`,
     [limit, game],
   );
+  const authorSlugs = await getAuthorSlugMap(game);
   return rows.map((row) => ({
     id: row.id,
     nameId: row.name_id,
     name: row.name,
     authorId: row.author_id,
     authorName: row.author_name,
-    authorNameId: slugify(row.author_name),
+    authorNameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
     profileUrl: row.profile_url,
     tags: row.tags ?? [],
     logoUrl: row.logo_url,
@@ -277,10 +314,10 @@ export async function upsertPluginsAndSnapshot(mods: IngestedMod[], capturedAt: 
         ],
       );
       await client.query(
-        `INSERT INTO plugin_snapshots (plugin_id, captured_at, downloads_total, downloads_today, subscribers_total, popularity_rank_position, game)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO plugin_snapshots (plugin_id, captured_at, downloads_total, downloads_today, subscribers_total, popularity_rank_position, game, date_updated)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8))
          ON CONFLICT (plugin_id, captured_at) DO NOTHING`,
-        [mod.id, capturedAt, mod.downloadsTotal, mod.downloadsToday, mod.subscribersTotal, mod.popularityRankPosition, mod.game],
+        [mod.id, capturedAt, mod.downloadsTotal, mod.downloadsToday, mod.subscribersTotal, mod.popularityRankPosition, mod.game, mod.dateUpdated],
       );
 
       // Replace the roster wholesale each run -- cheap at this scale and
@@ -328,7 +365,8 @@ async function topPluginsByLatestMetric(metric: "downloads_total" | "downloads_t
      LIMIT $1`,
     [limit, LEADERBOARD_EXCLUDED_TAG, game],
   );
-  return rows.map(toPluginRow);
+  const authorSlugs = await getAuthorSlugMap(game);
+  return rows.map((row) => toPluginRow(row, authorSlugs));
 }
 
 // Downloads gained between the latest snapshot and the nearest snapshot at
@@ -355,7 +393,8 @@ async function topPluginsByGain(cutoffDays: number, game: string, limit: number)
      LIMIT $1`,
     [limit, cutoffDays, LEADERBOARD_EXCLUDED_TAG, game],
   );
-  return rows.map(toPluginRow);
+  const authorSlugs = await getAuthorSlugMap(game);
+  return rows.map((row) => toPluginRow(row, authorSlugs));
 }
 
 // Rank of specific plugins within the alltime/hot leaderboard, without
@@ -418,6 +457,7 @@ export async function getFastestGrowingPlugins(limit = 5, cutoffDays = 7, game =
      LIMIT $1`,
     [limit, cutoffDays, LEADERBOARD_EXCLUDED_TAG, game],
   );
+  const authorSlugs = await getAuthorSlugMap(game);
   return rows
     .map((row) => ({
       id: row.id,
@@ -425,7 +465,7 @@ export async function getFastestGrowingPlugins(limit = 5, cutoffDays = 7, game =
       name: row.name,
       authorId: row.author_id,
       authorName: row.author_name,
-      authorNameId: slugify(row.author_name),
+      authorNameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
       profileUrl: row.profile_url,
       downloadsTotal: Number(row.downloads_total),
       subscribersTotal: Number(row.subscribers_total),
@@ -608,6 +648,7 @@ export async function searchPluginsAndAuthors(
     [q, game, LEADERBOARD_EXCLUDED_TAG, authorLimit],
   );
 
+  const authorSlugs = await getAuthorSlugMap(game);
   return {
     plugins: pluginsResult.rows.map((row) => ({
       id: row.id,
@@ -619,7 +660,7 @@ export async function searchPluginsAndAuthors(
     })),
     authors: authorsResult.rows.map((row) => ({
       id: row.author_id,
-      nameId: slugify(row.author_name),
+      nameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
       name: row.author_name,
       avatarUrl: row.author_avatar_url,
       pluginCount: Number(row.plugin_count),
@@ -652,16 +693,19 @@ export interface PluginMeta {
   dateUpdated: string;
 }
 
-export async function getPluginCoAuthors(pluginId: number): Promise<CoAuthor[]> {
+export async function getPluginCoAuthors(pluginId: number, game: string): Promise<CoAuthor[]> {
   const pool = getPool();
-  const { rows } = await pool.query(
-    `SELECT author_id, author_name, author_avatar_url, author_profile_url
-     FROM plugin_authors WHERE plugin_id = $1 ORDER BY position ASC`,
-    [pluginId],
-  );
+  const [{ rows }, authorSlugs] = await Promise.all([
+    pool.query(
+      `SELECT author_id, author_name, author_avatar_url, author_profile_url
+       FROM plugin_authors WHERE plugin_id = $1 ORDER BY position ASC`,
+      [pluginId],
+    ),
+    getAuthorSlugMap(game),
+  ]);
   return rows.map((row) => ({
     authorId: row.author_id,
-    nameId: slugify(row.author_name),
+    nameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
     name: row.author_name,
     avatarUrl: row.author_avatar_url,
     profileUrl: row.author_profile_url,
@@ -679,7 +723,7 @@ export async function getPlugin(pluginId: number): Promise<PluginMeta | null> {
   );
   if (rows.length === 0) return null;
   const row = rows[0];
-  const coAuthors = await getPluginCoAuthors(pluginId);
+  const [coAuthors, authorSlugs] = await Promise.all([getPluginCoAuthors(pluginId, row.game), getAuthorSlugMap(row.game)]);
   return {
     id: row.id,
     game: row.game,
@@ -687,7 +731,7 @@ export async function getPlugin(pluginId: number): Promise<PluginMeta | null> {
     name: row.name,
     authorId: row.author_id,
     authorName: row.author_name,
-    authorNameId: slugify(row.author_name),
+    authorNameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
     authorAvatarUrl: row.author_avatar_url,
     coAuthors,
     profileUrl: row.profile_url,
@@ -732,7 +776,7 @@ export async function getPluginInfo(pluginId: number): Promise<PluginInfo | null
   );
   if (rows.length === 0) return null;
   const row = rows[0];
-  const coAuthors = await getPluginCoAuthors(pluginId);
+  const [coAuthors, authorSlugs] = await Promise.all([getPluginCoAuthors(pluginId, row.game), getAuthorSlugMap(row.game)]);
   return {
     id: row.id,
     game: row.game,
@@ -740,7 +784,7 @@ export async function getPluginInfo(pluginId: number): Promise<PluginInfo | null
     name: row.name,
     authorId: row.author_id,
     authorName: row.author_name,
-    authorNameId: slugify(row.author_name),
+    authorNameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
     authorAvatarUrl: row.author_avatar_url,
     coAuthors,
     profileUrl: row.profile_url,
@@ -761,29 +805,60 @@ export async function getPluginInfo(pluginId: number): Promise<PluginInfo | null
   };
 }
 
+// Rolled up to one row per UTC calendar day (the trend chart's annotation
+// logic -- median-of-±5-*days*, a 7-*day* zoom floor, one calendar cell per
+// day -- needs daily granularity), even though ingest actually runs hourly
+// and plugin_snapshots is hourly-grain. Each day takes its last snapshot
+// strictly before the next day starts -- same "forward-fill the latest
+// known value onto each day" pattern as getDailySeriesByPlugin above, just
+// for a single plugin and also carrying date_updated through.
+//
+// The day is pulled out via to_char rather than letting node-postgres parse
+// the `date` column itself: pg's default type parser for `date` returns a
+// JS Date set to *local* midnight, not UTC midnight, which silently shifts
+// the day by one depending on the server's timezone -- the exact bug
+// already hit once this session parsing wiki update dates (see
+// packages/ingest/src/wikiUpdates.ts). Plain text sidesteps it entirely.
 export async function getPluginTrend(pluginId: number): Promise<PluginTrendPoint[]> {
   const pool = getPool();
   const { rows } = await pool.query(
-    `SELECT captured_at, downloads_total, downloads_today, subscribers_total
-     FROM plugin_snapshots WHERE plugin_id = $1 ORDER BY captured_at ASC`,
+    `WITH bounds AS (
+       SELECT (min(captured_at) AT TIME ZONE 'UTC')::date AS first_day,
+              (max(captured_at) AT TIME ZONE 'UTC')::date AS last_day
+       FROM plugin_snapshots WHERE plugin_id = $1
+     ),
+     days AS (
+       SELECT generate_series(first_day, last_day, interval '1 day')::date AS day FROM bounds
+     )
+     SELECT to_char(d.day, 'YYYY-MM-DD') AS day,
+            l.downloads_total, l.downloads_today, l.subscribers_total, l.date_updated
+     FROM days d
+     JOIN LATERAL (
+       SELECT downloads_total, downloads_today, subscribers_total, date_updated
+       FROM plugin_snapshots s
+       WHERE s.plugin_id = $1 AND (s.captured_at AT TIME ZONE 'UTC') < d.day + interval '1 day'
+       ORDER BY s.captured_at DESC LIMIT 1
+     ) l ON true
+     ORDER BY d.day`,
     [pluginId],
   );
   return rows.map((row) => ({
-    capturedAt: row.captured_at.toISOString(),
+    capturedAt: `${row.day}T00:00:00.000Z`,
     downloadsTotal: row.downloads_total,
     downloadsToday: row.downloads_today,
     subscribersTotal: row.subscribers_total,
+    dateUpdated: row.date_updated ? row.date_updated.toISOString() : null,
   }));
 }
 
-function toPluginRow(row: any): PluginLeaderboardRow {
+function toPluginRow(row: any, authorSlugs: Map<number, string>): PluginLeaderboardRow {
   return {
     id: row.id,
     nameId: row.name_id,
     name: row.name,
     authorId: row.author_id,
     authorName: row.author_name,
-    authorNameId: slugify(row.author_name),
+    authorNameId: authorSlugs.get(row.author_id) ?? slugify(row.author_name),
     authorAvatarUrl: row.author_avatar_url,
     profileUrl: row.profile_url,
     tags: row.tags ?? [],
@@ -1304,7 +1379,7 @@ export async function getCompareData(type: CompareType, keys: number[], metric: 
     byAuthor.get(authorId)!.reduce((min, r) => (r.date_added < min ? r.date_added : min), byAuthor.get(authorId)![0].date_added);
   const game = pluginRows[0].game;
 
-  const authorRanks = await getAuthorRanks(orderedKeys, "alltime", game);
+  const [authorRanks, authorSlugs] = await Promise.all([getAuthorRanks(orderedKeys, "alltime", game), getAuthorSlugMap(game)]);
   const rankOfAuthor = (authorId: number) => authorRanks.get(authorId) ?? null;
 
   const { fromDate, toDate } = resolveCompareRange(
@@ -1325,7 +1400,7 @@ export async function getCompareData(type: CompareType, keys: number[], metric: 
     const subs = plugins.reduce((sum, r) => sum + Number(r.subs_now), 0);
     return {
       key: authorId,
-      nameId: slugify(plugins[0].author_name),
+      nameId: authorSlugs.get(authorId) ?? slugify(plugins[0].author_name),
       name: plugins[0].author_name,
       sub: `${plugins.length} ${plugins.length === 1 ? "plugin" : "plugins"}`,
       series: extractMetricSeries(sumSeries, metric, padCount),
@@ -1367,27 +1442,221 @@ export async function getPluginIdByNameId(nameId: string, game: string): Promise
 
 // Authors have no stored slug (author info is denormalized across
 // plugins/plugin_authors, not a dedicated table), so this resolves a
-// pretty URL slug back to an author_id by slugifying every distinct
-// author name in the game and matching -- same slugify() used when the
-// API annotates rows with nameId, so a slug it hands out always resolves
-// back here. Ties (two different author_ids slugifying to the same
-// string) pick the lowest id, which is at least deterministic.
+// pretty URL slug back to an author_id via the same disambiguated map
+// (see getAuthorSlugMap) used to hand the slug out in the first place, so
+// a slug the API hands out always resolves back to the right author even
+// when it was suffixed to break a collision.
 export async function getAuthorIdBySlug(slug: string, game: string): Promise<number | null> {
-  const pool = getPool();
-  const { rows } = await pool.query(
-    `SELECT DISTINCT pa.author_id, pa.author_name
-     FROM plugin_authors pa
-     JOIN plugins p ON p.id = pa.plugin_id
-     WHERE p.game = $1
-     ORDER BY pa.author_id ASC`,
-    [game],
-  );
-  const exact = rows.find((r) => slugify(r.author_name) === slug);
-  if (exact) return exact.author_id;
+  const authorSlugs = await getAuthorSlugMap(game);
+  for (const [authorId, authorSlug] of authorSlugs) {
+    if (authorSlug === slug) return authorId;
+  }
 
   // Same punctuation/whitespace-insensitive fallback as plugins -- "jin
   // jiyunsun" (a space, not the canonical hyphen) should still resolve.
   const target = normalizeSlug(slug);
   if (!target) return null;
-  return rows.find((r) => normalizeSlug(r.author_name) === target)?.author_id ?? null;
+  for (const [authorId, authorSlug] of authorSlugs) {
+    if (normalizeSlug(authorSlug) === target) return authorId;
+  }
+  return null;
+}
+
+// Upserted by wiki_page_id (not title/slug) so a later on-wiki title edit
+// updates the existing row instead of creating a duplicate -- see
+// packages/ingest/src/wikiUpdates.ts for where these come from.
+export async function upsertGameUpdates(updates: GameUpdateInput[]): Promise<number> {
+  if (updates.length === 0) return 0;
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const u of updates) {
+      await client.query(
+        `INSERT INTO game_updates (game, wiki_page_id, title, update_date, url, wiki_url)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (game, wiki_page_id) DO UPDATE SET
+           title = EXCLUDED.title,
+           update_date = EXCLUDED.update_date,
+           url = EXCLUDED.url,
+           wiki_url = EXCLUDED.wiki_url`,
+        [u.game, u.wikiPageId, u.title, u.date, u.url, u.wikiUrl],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+  return updates.length;
+}
+
+// Plain id + external key per plugin in a game, for the one-time release
+// backfill (packages/ingest/src/backfill-releases.ts) to iterate over --
+// "external key" is the mod.io numeric id re-stringified for 'runescape',
+// or the plugin-hub internalName (name_id) for 'runelite'.
+// dateAdded is the plugin's own upstream "first published" timestamp (mod.io's
+// date_added / RuneLite manifest's createdAt -- see plugins.date_added's own
+// comment in schema.sql), not a locally-synthesized "when we first saw it" --
+// used by the release backfill to anchor a synthetic first release when the
+// real tracked history doesn't reach back that far (see backfill-releases.ts).
+export async function listPluginIdsForGame(game: string): Promise<{ id: number; nameId: string; dateAdded: string }[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT id, name_id, date_added FROM plugins WHERE game = $1 ORDER BY id`, [game]);
+  return rows.map((r) => ({ id: r.id, nameId: r.name_id, dateAdded: r.date_added.toISOString() }));
+}
+
+// Upserts on (plugin_id, source, source_key) so re-running the backfill (or
+// a later recurring job built on the same fetchers) is a no-op on releases
+// it's already seen -- see schema.sql's plugin_releases comment.
+export async function upsertPluginReleases(releases: PluginReleaseInput[]): Promise<number> {
+  if (releases.length === 0) return 0;
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const r of releases) {
+      await client.query(
+        `INSERT INTO plugin_releases (plugin_id, source, source_key, kind, released_at, version, changelog, url)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (plugin_id, source, source_key) DO UPDATE SET
+           kind = EXCLUDED.kind,
+           released_at = EXCLUDED.released_at,
+           version = EXCLUDED.version,
+           changelog = EXCLUDED.changelog,
+           url = EXCLUDED.url`,
+        [r.pluginId, r.source, r.sourceKey, r.kind, r.releasedAt, r.version, r.changelog, r.url],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+  return releases.length;
+}
+
+export async function getPluginReleases(pluginId: number): Promise<PluginRelease[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT id, plugin_id, source, kind, released_at, version, changelog, url
+     FROM plugin_releases WHERE plugin_id = $1 ORDER BY released_at DESC`,
+    [pluginId],
+  );
+  return rows.map(toPluginRelease);
+}
+
+// Batch form for the Compare page (up to 4 plugins at once, see /api/plugins/releases).
+export async function getPluginReleasesForIds(pluginIds: number[]): Promise<Map<number, PluginRelease[]>> {
+  const map = new Map<number, PluginRelease[]>();
+  if (pluginIds.length === 0) return map;
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT id, plugin_id, source, kind, released_at, version, changelog, url
+     FROM plugin_releases WHERE plugin_id = ANY($1::int[]) ORDER BY plugin_id, released_at DESC`,
+    [pluginIds],
+  );
+  for (const row of rows) {
+    const release = toPluginRelease(row);
+    const list = map.get(release.pluginId) ?? [];
+    list.push(release);
+    map.set(release.pluginId, list);
+  }
+  return map;
+}
+
+function toPluginRelease(r: any): PluginRelease {
+  return {
+    id: r.id,
+    pluginId: r.plugin_id,
+    source: r.source,
+    kind: r.kind,
+    releasedAt: r.released_at.toISOString(),
+    version: r.version,
+    changelog: r.changelog,
+    url: r.url,
+  };
+}
+
+// Wholesale-replaces special_events from packages/ingest/data/special-
+// events.json on every sync (DELETE + reinsert in one transaction) rather
+// than upserting by key -- the JSON is hand-edited and small, and is the
+// single source of truth for this table, so a renamed/removed entry in the
+// file should disappear here too instead of leaving an orphaned row behind.
+export async function replaceSpecialEvents(events: SpecialEventInput[]): Promise<number> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM special_events");
+    for (const e of events) {
+      await client.query(`INSERT INTO special_events (game, title, start_date, end_date, url) VALUES ($1, $2, $3, $4, $5)`, [
+        e.game,
+        e.title,
+        e.start,
+        e.end,
+        e.url,
+      ]);
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+  return events.length;
+}
+
+// RuneLite and OSRS-via-mod.io are the same underlying game, so both read
+// the same game_updates/special_events rows -- an incoming "runelite" or
+// "osrs" GameKey normalizes to "oldschool" here before querying either
+// table, rather than every call site needing to know this.
+export function normalizeAnnotationGame(game: string): AnnotationGameKey {
+  return game === "runelite" || game === "osrs" ? "oldschool" : (game as AnnotationGameKey);
+}
+
+export async function getGameUpdates(game: string, from: string, to: string): Promise<GameUpdate[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT id, game, title, update_date, url, wiki_url
+     FROM game_updates
+     WHERE game = $1 AND update_date BETWEEN $2 AND $3
+     ORDER BY update_date ASC`,
+    [normalizeAnnotationGame(game), from, to],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    game: row.game,
+    title: row.title,
+    date: row.update_date.toISOString().slice(0, 10),
+    url: row.url,
+    wikiUrl: row.wiki_url,
+  }));
+}
+
+// Range-overlap, not a date equality check -- an event starting before
+// `from` and still running (or with no end at all) past it still overlaps
+// the requested window and should come back.
+export async function getSpecialEvents(game: string, from: string, to: string): Promise<SpecialEvent[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT id, game, title, start_date, end_date, url
+     FROM special_events
+     WHERE game = $1 AND start_date <= $3 AND (end_date IS NULL OR end_date >= $2)
+     ORDER BY start_date ASC`,
+    [normalizeAnnotationGame(game), from, to],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    game: row.game,
+    title: row.title,
+    start: row.start_date.toISOString().slice(0, 10),
+    end: row.end_date ? row.end_date.toISOString().slice(0, 10) : null,
+    url: row.url,
+  }));
 }

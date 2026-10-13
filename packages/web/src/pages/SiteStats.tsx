@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import {
   getCategoryStatsPage,
   getCompareData,
+  getPluginReleasesBatch,
+  getSpecialEvents,
   getStatsOverview,
   getTopAuthors,
   getTopPlugins,
@@ -16,9 +18,12 @@ import {
   type CompareResult,
   type CompareType,
   type PluginLeaderboardRow,
+  type PluginRelease,
+  type SpecialEvent,
   type StatsOverview,
 } from "../api";
-import { DailyChart, formatTooltipDate } from "../components/DailyChart";
+import { DailyChart, formatTooltipDate, type Win } from "../components/DailyChart";
+import { resolveEvents, resolveReleases, type ResolvedRelease } from "../lib/trendAnnotations";
 import { Pagination } from "../components/Pagination";
 import { useGame, type Game } from "../context/GameContext";
 import { authorHref, pluginHref } from "../lib/links";
@@ -179,6 +184,46 @@ export function SiteStats() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, cmpType, idsKey, cmpMetric, cmpRange]);
+
+  // Events are plain calendar facts for the current game, shared across every item in
+  // the comparison -- fetched once per compare result's date range, same pattern as the
+  // single-plugin trend page.
+  const [cmpSpecialEvents, setCmpSpecialEvents] = useState<SpecialEvent[]>([]);
+  const [showCmpEvents, setShowCmpEvents] = useState(true);
+  const [showCmpReleases, setShowCmpReleases] = useState(true);
+
+  useEffect(() => {
+    if (!compareResult) {
+      setCmpSpecialEvents([]);
+      return;
+    }
+    let cancelled = false;
+    getSpecialEvents(game, compareResult.from, compareResult.to).then((e) => {
+      if (!cancelled) setCmpSpecialEvents(e.events);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [game, compareResult?.from, compareResult?.to]);
+
+  // Real backfilled release history (see packages/ingest/src/backfill-releases.ts),
+  // keyed by plugin id -- only meaningful for type "plugin" (effectiveIds are author
+  // ids for type "author", which plugin_releases knows nothing about).
+  const [cmpReleases, setCmpReleases] = useState<Record<number, PluginRelease[]>>({});
+
+  useEffect(() => {
+    if (cmpType !== "plugin" || effectiveIds.length === 0) {
+      setCmpReleases({});
+      return;
+    }
+    let cancelled = false;
+    getPluginReleasesBatch(effectiveIds).then((r) => {
+      if (!cancelled) setCmpReleases(r.releases);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cmpType, idsKey]);
 
   // allCandidates is the capped local list, so a chip added from a remote
   // search result (see suggestions below) won't resolve its name/sub there
@@ -413,6 +458,12 @@ export function SiteStats() {
               onRange={(r) => updateCompare({ range: r })}
               focusId={focusId}
               onOpen={(nameId) => navigate(cmpType === "plugin" ? pluginHref(nameId, game) : authorHref(nameId, game))}
+              specialEvents={cmpSpecialEvents}
+              releasesByPluginId={cmpReleases}
+              showEvents={showCmpEvents}
+              showReleases={showCmpReleases}
+              onToggleEvents={() => setShowCmpEvents((v) => !v)}
+              onToggleReleases={() => setShowCmpReleases((v) => !v)}
             />
           )}
         </div>
@@ -735,6 +786,12 @@ function CompareResults({
   onRange,
   focusId,
   onOpen,
+  specialEvents,
+  releasesByPluginId,
+  showEvents,
+  showReleases,
+  onToggleEvents,
+  onToggleReleases,
 }: {
   result: CompareResult | null;
   itemCount: number;
@@ -745,8 +802,70 @@ function CompareResults({
   onRange: (r: CompareRangeKey) => void;
   focusId: number | null;
   onOpen: (nameId: string) => void;
+  specialEvents: SpecialEvent[];
+  releasesByPluginId: Record<number, PluginRelease[]>;
+  showEvents: boolean;
+  showReleases: boolean;
+  onToggleEvents: () => void;
+  onToggleReleases: () => void;
 }) {
   const { game } = useGame();
+  // Computed unconditionally (not after the early return below) so this component calls
+  // the same hooks on every render regardless of whether result is loaded yet.
+  const dates = result ? dateRangeArray(result.from, result.to) : [];
+  const resolvedEvents = useMemo(() => resolveEvents(dates, specialEvents), [dates, specialEvents]);
+  // Real backfilled release history ("Plugin updates") -- each compared item tracks
+  // its own releases independently, unlike events which are shared calendar facts for
+  // the whole game.
+  const releaseMapsByItem = useMemo(
+    () => (result?.items ?? []).map((it) => resolveReleases(dates, releasesByPluginId[it.key])),
+    [result, dates, releasesByPluginId],
+  );
+  const releaseDays = useMemo(() => {
+    const set = new Set<number>();
+    for (const m of releaseMapsByItem) for (const [d, r] of m) if (r.isInitial) set.add(d);
+    return Array.from(set);
+  }, [releaseMapsByItem]);
+  const updateDays = useMemo(() => {
+    const set = new Set<number>();
+    for (const m of releaseMapsByItem) for (const [d, r] of m) if (!r.isInitial) set.add(d);
+    return Array.from(set);
+  }, [releaseMapsByItem]);
+  // Zoom lives here (not inside DailyChart) so the Zoom buttons can sit in this
+  // component's own header row, matching TrendChart's layout exactly.
+  const [zoom, setZoom] = useState<Win | null>(null);
+  useEffect(() => {
+    setZoom(null);
+  }, [result?.from, result?.to, metric]);
+  const lastAll = Math.max(0, dates.length - 1);
+  const zoomWin = zoom ?? { a: 0, b: lastAll };
+  const MINW = 4;
+  function zoomBy(factor: number) {
+    const w = zoomWin.b - zoomWin.a;
+    const nw = Math.max(MINW, Math.min(lastAll, Math.round(w * factor)));
+    if (nw === w) return;
+    const c = (zoomWin.a + zoomWin.b) / 2;
+    let a = Math.round(c - ((c - zoomWin.a) * nw) / w);
+    a = Math.max(0, Math.min(lastAll - nw, a));
+    setZoom(nw >= lastAll ? null : { a, b: a + nw });
+  }
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsAnchorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!settingsOpen) return;
+    function onDown(e: MouseEvent) {
+      if (settingsAnchorRef.current && !settingsAnchorRef.current.contains(e.target as Node)) setSettingsOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setSettingsOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [settingsOpen]);
 
   if (!result || result.items.length === 0) {
     const cols = cmpTableCols(itemCount);
@@ -783,7 +902,6 @@ function CompareResults({
     );
   }
 
-  const dates = dateRangeArray(result.from, result.to);
   const lines = result.items.map((it, i) => ({ id: it.key, color: COMPARE_COLORS[i], values: it.series }));
   const metricLabel =
     game === "runelite"
@@ -795,65 +913,160 @@ function CompareResults({
           : "Subscribers";
   const rangeLabel = dates.length ? `${formatDateMed(dates[0])} – ${formatDateMed(dates[dates.length - 1])}` : "";
   const rows = buildCompareRows(result.items, type, game);
+  const items = result.items;
+  function annotationLine(i: number): { label: string; text: string; color: string } | null {
+    const ev = showEvents ? resolvedEvents.find((e) => i >= e.a && i <= e.b) : undefined;
+    if (ev) return { label: "Event", text: ev.event.title, color: "var(--evText)" };
+    if (showReleases) {
+      const released: { it: (typeof items)[number]; release: ResolvedRelease }[] = [];
+      for (const [idx, it] of items.entries()) {
+        const release = releaseMapsByItem[idx]?.get(i);
+        if (release) released.push({ it, release });
+      }
+      if (released.length) {
+        const text = released.map(({ it, release }) => (release.version ? `${it.name} (v${release.version})` : it.name)).join(", ");
+        return { label: "Plugin Update", text, color: "var(--rel)" };
+      }
+    }
+    return null;
+  }
 
   return (
     <>
-      <div className="card">
-        <div className="card-edge" />
-        <div className="chart-card-head">
-          <div className="chart-card-title">
-            <span className="chart-metric-label">{metricLabel}</span>
-            <span className="chart-range-text">{rangeLabel}</span>
+      <section className="ppc" aria-label="Compare chart">
+        <header className="ppc-head">
+          <div className="ppc-heading">
+            <span className="ppc-title">{metricLabel}</span>
+            <span className="ppc-sub">{rangeLabel}</span>
           </div>
-          <div className="chart-controls">
-            <div className="period-group" role="radiogroup" aria-label="Metric">
+          <div className="ppc-controls">
+            <div className="ppc-seg" role="radiogroup" aria-label="Metric">
               {cmpMetrics(game).map((m) => (
-                <button key={m.key} className={`range-btn ${metric === m.key ? "active" : ""}`} onClick={() => onMetric(m.key)}>
+                <button key={m.key} type="button" role="radio" aria-checked={metric === m.key} onClick={() => onMetric(m.key)}>
                   {m.label}
                 </button>
               ))}
             </div>
-            <div className="period-group" role="radiogroup" aria-label="Range">
+            <div className="ppc-seg" role="radiogroup" aria-label="Range">
               {CMP_RANGES.map((r) => (
-                <button key={String(r.key)} className={`range-btn ${range === r.key ? "active" : ""}`} onClick={() => onRange(r.key)}>
+                <button key={String(r.key)} type="button" role="radio" aria-checked={range === r.key} onClick={() => onRange(r.key)}>
                   {r.label}
                 </button>
               ))}
             </div>
-            <div className="period-group" role="group" aria-label="Export">
-              <button className="range-btn" onClick={() => exportCompare(result, dates, "csv")}>
-                Export CSV
+            <div className="ppc-seg" role="group" aria-label="Zoom">
+              <button type="button" className="ppc-icon" aria-label="Zoom out" title="Zoom out" disabled={zoomWin.b - zoomWin.a >= lastAll} onClick={() => zoomBy(1 / 0.6)}>
+                <ZoomOutIcon />
               </button>
-              <button className="range-btn" onClick={() => exportCompare(result, dates, "json")}>
-                Export JSON
+              <button type="button" className="ppc-icon" aria-label="Zoom in" title="Zoom in" disabled={zoomWin.b - zoomWin.a <= MINW} onClick={() => zoomBy(0.6)}>
+                <ZoomInIcon />
+              </button>
+              <button type="button" className="ppc-reset" aria-label="Reset zoom" disabled={!zoom} onClick={() => setZoom(null)}>
+                Reset
               </button>
             </div>
+            <div className="ppc-anchor" ref={settingsAnchorRef}>
+              <button type="button" className="ppc-btn" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((o) => !o)}>
+                <SlidersIcon />
+                Chart settings
+                {(!showEvents || !showReleases) && <span className="ppc-badge">{[!showEvents, !showReleases].filter(Boolean).length} off</span>}
+              </button>
+              {settingsOpen && (
+                <div className="ppc-pop ppc-pop--settings" role="dialog" aria-label="Chart settings">
+                  <div className="ppc-sec ppc-sec--layers">
+                    <span className="ppc-eyebrow">Annotations</span>
+                    <label className="ppc-layer">
+                      <span className="ppc-layer-ic">
+                        <svg width={18} height={18} viewBox="0 0 18 18">
+                          <rect x={1} y={1} width={16} height={16} rx={2} fill="rgba(127,176,214,.16)" />
+                          <circle cx={9} cy={9} r={4} fill="var(--raise)" stroke="var(--ev)" strokeWidth={1.8} />
+                        </svg>
+                      </span>
+                      <span className="ppc-layer-txt">
+                        <span className="ppc-layer-label">Event periods</span>
+                        <span className="ppc-small">Shading plus start and end markers</span>
+                      </span>
+                      <button type="button" className="ppc-switch" role="switch" aria-checked={showEvents} aria-label="Event periods" onClick={onToggleEvents} />
+                    </label>
+                    <label className="ppc-layer">
+                      <span className="ppc-layer-ic">
+                        <svg width={18} height={18} viewBox="0 0 18 18">
+                          <rect x={5} y={5} width={8} height={8} rx={2} fill="var(--rel)" />
+                        </svg>
+                      </span>
+                      <span className="ppc-layer-txt">
+                        <span className="ppc-layer-label">Releases &amp; updates</span>
+                        <span className="ppc-small">Each item's first release, and every one after it</span>
+                      </span>
+                      <button type="button" className="ppc-switch" role="switch" aria-checked={showReleases} aria-label="Releases and updates" onClick={onToggleReleases} />
+                    </label>
+                  </div>
+                  <div className="ppc-sec">
+                    <div className="ppc-row">
+                      <span className="ppc-eyebrow">Export range</span>
+                      <div className="ppc-actions">
+                        <button type="button" className="ppc-ghost" onClick={() => exportCompare(result, dates, "csv")}>
+                          CSV
+                        </button>
+                        <button type="button" className="ppc-ghost" onClick={() => exportCompare(result, dates, "json")}>
+                          JSON
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-        <div style={{ padding: "8px clamp(8px, 3vw, 20px) 14px" }}>
+        </header>
+        <div className="ppc-plotwrap">
           <DailyChart
             dates={dates}
             lines={lines}
             zeroBased={metric === "daily"}
             focusId={focusId}
-            renderTooltip={(i, date) => (
-              <>
-                <div style={{ fontSize: 11, color: "var(--dim)", marginBottom: 2 }}>{formatTooltipDate(date)}</div>
-                {result.items
-                  .map((it, idx) => ({ it, idx, v: it.series[i] }))
-                  .sort((a, b) => b.v - a.v)
-                  .map(({ it, idx, v }) => (
-                    <div key={it.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: COMPARE_COLORS[idx], flex: "none" }} />
-                      <span style={{ flex: 1, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", color: "var(--muted)" }}>{it.name}</span>
-                      <span style={{ fontWeight: 600, color: "var(--text)", paddingLeft: 10 }}>{v.toLocaleString()}</span>
+            interactive
+            events={resolvedEvents}
+            releaseDays={releaseDays}
+            updateDays={updateDays}
+            showEvents={showEvents}
+            showReleases={showReleases}
+            zoom={zoom}
+            onZoomChange={setZoom}
+            renderTooltip={(i, date) => {
+              const note = annotationLine(i);
+              return (
+                <>
+                  <div style={{ fontSize: 11, color: "var(--dim)", marginBottom: 2 }}>{formatTooltipDate(date)}</div>
+                  {note && (
+                    <div style={{ fontSize: 11, fontWeight: 600, color: note.color, marginBottom: 2 }}>
+                      {note.label} · {note.text}
                     </div>
-                  ))}
-              </>
-            )}
+                  )}
+                  {result.items
+                    .map((it, idx) => ({ it, idx, v: it.series[i] }))
+                    .sort((a, b) => b.v - a.v)
+                    .map(({ it, idx, v }) => (
+                      <div key={it.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: COMPARE_COLORS[idx], flex: "none" }} />
+                        <span style={{ flex: 1, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", color: "var(--muted)" }}>{it.name}</span>
+                        <span style={{ fontWeight: 600, color: "var(--text)", paddingLeft: 10 }}>{v.toLocaleString()}</span>
+                      </div>
+                    ))}
+                </>
+              );
+            }}
           />
         </div>
-      </div>
+        <footer className="ppc-key" style={{ justifyContent: "center" }}>
+          <div className="ppc-key-item ppc-key-item--warn">
+            <WarningIcon />
+            <span className="ppc-key-desc">
+              Markers show date overlap only. A marked day lined up with an event or plugin update; it does not prove that caused the change.
+            </span>
+          </div>
+        </footer>
+      </section>
 
       <div className="card">
         <div className="card-edge" />
@@ -1014,4 +1227,42 @@ function compact(v: number): string {
   if (v >= 1e6) return `${(v / 1e6).toFixed(v >= 1e7 ? 0 : 1).replace(/\.0$/, "")}M`;
   if (v >= 1e3) return `${(v / 1e3).toFixed(v >= 1e4 ? 0 : 1).replace(/\.0$/, "")}k`;
   return String(Math.round(v));
+}
+
+function SlidersIcon() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 14 14" aria-hidden="true">
+      <path d="M1.5 3.5H12.5M1.5 7H12.5M1.5 10.5H12.5" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" />
+      <circle cx={4.5} cy={3.5} r={1.6} fill="var(--raise)" stroke="currentColor" strokeWidth={1.3} />
+      <circle cx={9.5} cy={7} r={1.6} fill="var(--raise)" stroke="currentColor" strokeWidth={1.3} />
+      <circle cx={6} cy={10.5} r={1.6} fill="var(--raise)" stroke="currentColor" strokeWidth={1.3} />
+    </svg>
+  );
+}
+
+function ZoomOutIcon() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 14 14" aria-hidden="true">
+      <circle cx={6} cy={6} r={4.3} fill="none" stroke="currentColor" strokeWidth={1.4} />
+      <path d="M9.2 9.2L12.5 12.5M4 6H8" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" />
+    </svg>
+  );
+}
+function ZoomInIcon() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 14 14" aria-hidden="true">
+      <circle cx={6} cy={6} r={4.3} fill="none" stroke="currentColor" strokeWidth={1.4} />
+      <path d="M9.2 9.2L12.5 12.5M4 6H8M6 4V8" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function WarningIcon() {
+  return (
+    <svg width={13} height={13} viewBox="0 0 14 14" aria-hidden="true">
+      <path d="M7 1.3L13 11.8H1L7 1.3Z" fill="none" stroke="currentColor" strokeWidth={1.3} strokeLinejoin="round" />
+      <path d="M7 5.3V8.3" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" />
+      <circle cx={7} cy={10.1} r={0.75} fill="currentColor" />
+    </svg>
+  );
 }

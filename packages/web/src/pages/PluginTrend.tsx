@@ -1,39 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { API_BASE, getPluginTrend, getTopPlugins, type PluginLeaderboardRow, type PluginMeta, type PluginTrendPoint } from "../api";
-import { TrendChart, trendMetrics, type ChartType, type TrendMetric } from "../components/TrendChart";
+import {
+  API_BASE,
+  getGameUpdates,
+  getPluginReleases,
+  getPluginTrend,
+  getSpecialEvents,
+  getTopPlugins,
+  type GameUpdate,
+  type PluginLeaderboardRow,
+  type PluginMeta,
+  type PluginRelease,
+  type PluginTrendPoint,
+  type SpecialEvent,
+} from "../api";
+import { TrendChart, trendMetrics, type TrendMetric } from "../components/TrendChart";
 import { useGame } from "../context/GameContext";
 import { AvatarImg } from "../components/AvatarImg";
 import { slugifyTag } from "../lib/slug";
 import { authorHref, pluginHref } from "../lib/links";
 import { usePageMeta } from "../hooks/usePageMeta";
 
-type RangePreset = "7d" | "30d" | "90d" | "all" | "custom";
-
-const CHART_TYPES: { key: ChartType; label: string }[] = [
-  { key: "line", label: "Line" },
-  { key: "bar", label: "Bar" },
-];
-
-const RANGE_PRESETS: { key: RangePreset; label: string; days: number | null }[] = [
-  { key: "7d", label: "7D", days: 7 },
-  { key: "30d", label: "30D", days: 30 },
-  { key: "90d", label: "90D", days: 90 },
-  { key: "all", label: "All", days: null },
-];
-
 const METRIC_KEYS: TrendMetric[] = ["downloadsTotal", "downloadsToday", "subscribersTotal"];
-const CHART_TYPE_KEYS = CHART_TYPES.map((t) => t.key);
-const RANGE_PRESET_KEYS = [...RANGE_PRESETS.map((p) => p.key), "custom"];
 
 function parseMetric(v: string | null): TrendMetric {
   return (METRIC_KEYS as string[]).includes(v ?? "") ? (v as TrendMetric) : "downloadsTotal";
-}
-function parseChartType(v: string | null): ChartType {
-  return (CHART_TYPE_KEYS as string[]).includes(v ?? "") ? (v as ChartType) : "line";
-}
-function parsePreset(v: string | null): RangePreset {
-  return (RANGE_PRESET_KEYS as string[]).includes(v ?? "") ? (v as RangePreset) : "30d";
 }
 
 export function PluginTrend() {
@@ -42,42 +33,49 @@ export function PluginTrend() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [plugin, setPlugin] = useState<PluginMeta | null>(null);
   const [points, setPoints] = useState<PluginTrendPoint[] | null>(null);
+  const [gameUpdates, setGameUpdates] = useState<GameUpdate[]>([]);
+  const [specialEvents, setSpecialEvents] = useState<SpecialEvent[]>([]);
+  const [releases, setReleases] = useState<PluginRelease[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // The URL is the single source of truth for metric/range/chart type,
-  // same pattern as the leaderboard, so links to a specific view are shareable.
+  // Metric is the one piece of chart state this page still owns directly
+  // (the tiles live outside the chart card) -- everything else (range,
+  // zoom, chart type, annotation layers, sensitivity) is read once from
+  // and reported back to this same URL by TrendChart itself.
+  //
+  // Both setMetric and handleChartParamsChange use setSearchParams's
+  // functional-updater form (prev => next), not a `new URLSearchParams
+  // (searchParams)` closing over the `searchParams` already in scope --
+  // TrendChart's own URL-sync effect doesn't (and shouldn't) list this
+  // callback in its dependency array, so a stale closure here would
+  // otherwise silently roll back whichever param changed more recently
+  // between a metric-tile click and a chart interaction.
   const metric = parseMetric(searchParams.get("metric"));
-  const chartType = parseChartType(searchParams.get("chart"));
-  const preset = parsePreset(searchParams.get("range"));
-  const customStart = preset === "custom" ? searchParams.get("from") ?? "" : "";
-  const customEnd = preset === "custom" ? searchParams.get("to") ?? "" : "";
-
-  function updateView(next: { metric?: TrendMetric; chartType?: ChartType; preset?: RangePreset; customStart?: string; customEnd?: string }) {
-    const nextMetric = next.metric ?? metric;
-    const nextChartType = next.chartType ?? chartType;
-    const nextPreset = next.preset ?? preset;
-    const nextCustomStart = next.customStart ?? customStart;
-    const nextCustomEnd = next.customEnd ?? customEnd;
-
-    const params = new URLSearchParams();
-    if (nextMetric !== "downloadsTotal") params.set("metric", nextMetric);
-    if (nextChartType !== "line") params.set("chart", nextChartType);
-    if (nextPreset !== "30d") params.set("range", nextPreset);
-    if (nextPreset === "custom" && nextCustomStart) params.set("from", nextCustomStart);
-    if (nextPreset === "custom" && nextCustomEnd) params.set("to", nextCustomEnd);
-    setSearchParams(params, { replace: true });
-  }
-
   function setMetric(m: TrendMetric) {
-    updateView({ metric: m });
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (m !== "downloadsTotal") next.set("metric", m);
+        else next.delete("metric");
+        return next;
+      },
+      { replace: true },
+    );
   }
-  function setChartType(c: ChartType) {
-    updateView({ chartType: c });
+  function handleChartParamsChange(patch: Record<string, string | null>) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        for (const [key, value] of Object.entries(patch)) {
+          if (value === null) next.delete(key);
+          else next.set(key, value);
+        }
+        return next;
+      },
+      { replace: true },
+    );
   }
 
-  const [customOpen, setCustomOpen] = useState(false);
-  const [draftStart, setDraftStart] = useState("");
-  const [draftEnd, setDraftEnd] = useState("");
   const [hotRank, setHotRank] = useState<number | null>(null);
   const [hotPlugins, setHotPlugins] = useState<PluginLeaderboardRow[] | null>(null);
   const [allPlugins, setAllPlugins] = useState<PluginLeaderboardRow[] | null>(null);
@@ -91,6 +89,21 @@ export function PluginTrend() {
         setPlugin(res.plugin);
         setPoints(res.trend);
         setGame(res.plugin.game);
+
+        getPluginReleases(res.pluginId, res.plugin.game)
+          .then((releasesRes) => setReleases(releasesRes.releases))
+          .catch(() => setReleases([]));
+
+        if (res.trend.length > 0) {
+          const from = res.trend[0].capturedAt.slice(0, 10);
+          const to = res.trend[res.trend.length - 1].capturedAt.slice(0, 10);
+          getGameUpdates(res.plugin.game, from, to)
+            .then((updatesRes) => setGameUpdates(updatesRes.updates))
+            .catch(() => setGameUpdates([]));
+          getSpecialEvents(res.plugin.game, from, to)
+            .then((eventsRes) => setSpecialEvents(eventsRes.events))
+            .catch(() => setSpecialEvents([]));
+        }
 
         getTopPlugins("hot", res.plugin.game, 15)
           .then((hotRes) => {
@@ -153,45 +166,6 @@ export function PluginTrend() {
       .sort((a, b) => b.shared - a.shared || b.plugin.value - a.plugin.value)
       .slice(0, 4);
   }, [allPlugins, plugin]);
-
-  function selectPreset(key: RangePreset) {
-    if (key === "custom") {
-      setDraftStart(customStart);
-      setDraftEnd(customEnd);
-      setCustomOpen(true);
-      return;
-    }
-    updateView({ preset: key, customStart: "", customEnd: "" });
-    setCustomOpen(false);
-  }
-
-  function applyCustom() {
-    if (!draftStart || !draftEnd || draftStart > draftEnd) return;
-    updateView({ preset: "custom", customStart: draftStart, customEnd: draftEnd });
-    setCustomOpen(false);
-  }
-
-  const filteredPoints = useMemo(() => {
-    if (!points) return points;
-
-    let start: number | null = null;
-    let end: number | null = null;
-
-    if (preset === "custom" && customStart && customEnd) {
-      start = new Date(customStart).getTime();
-      end = new Date(customEnd).getTime() + 24 * 60 * 60 * 1000 - 1;
-    } else {
-      const activeDays = RANGE_PRESETS.find((p) => p.key === preset)?.days ?? null;
-      if (activeDays !== null) start = Date.now() - activeDays * 24 * 60 * 60 * 1000;
-    }
-
-    return points.filter((p) => {
-      const t = new Date(p.capturedAt).getTime();
-      if (start !== null && t < start) return false;
-      if (end !== null && t > end) return false;
-      return true;
-    });
-  }, [points, preset, customStart, customEnd]);
 
   if (error) {
     return (
@@ -260,8 +234,6 @@ export function PluginTrend() {
   const activeMetric = metrics.find((m) => m.key === metric)!;
   const last = points[points.length - 1];
   const tiles = metrics.map((m) => ({ ...m, ...tileValueAndSub(points, m.key) }));
-  const rangeLabel = describeRange(preset, customStart, customEnd, points);
-  const customButtonLabel = preset === "custom" && customStart && customEnd ? formatCustomRangeLabel(customStart, customEnd) : null;
   const compareIds = [plugin.id, ...(hotPlugins ?? []).filter((p) => p.id !== plugin.id).slice(0, 2).map((p) => p.id)];
   const compact = plugin.game === "runelite";
   const authorEntries = plugin.coAuthors;
@@ -439,90 +411,19 @@ export function PluginTrend() {
         ))}
       </div>
 
-      <div className="card">
-        <div className="card-edge" />
-        <div className="chart-card-head">
-          <div className="chart-card-title">
-            <span className="chart-metric-label">{activeMetric.label}</span>
-            <span className="chart-range-text">{rangeLabel}</span>
-          </div>
-          <div className="chart-controls">
-            <div className="period-group" role="radiogroup" aria-label="Range">
-              {RANGE_PRESETS.map((p) => (
-                <button key={p.key} className={`range-btn ${preset === p.key ? "active" : ""}`} onClick={() => selectPreset(p.key)}>
-                  {p.label}
-                </button>
-              ))}
-              <button className={`range-btn ${preset === "custom" ? "active" : ""}`} onClick={() => selectPreset("custom")}>
-                <CalendarIcon />
-                {customButtonLabel ?? "Custom"}
-              </button>
-            </div>
-            <div className="period-group" role="radiogroup" aria-label="Chart type">
-              {CHART_TYPES.map((t) => (
-                <button key={t.key} className={`range-btn ${chartType === t.key ? "active" : ""}`} onClick={() => setChartType(t.key)}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <div className="period-group" role="group" aria-label="Export">
-              <button className="range-btn" onClick={() => downloadTrend(filteredPoints ?? points, plugin.name, "csv")}>
-                Export CSV
-              </button>
-              <button className="range-btn" onClick={() => downloadTrend(filteredPoints ?? points, plugin.name, "json")}>
-                Export JSON
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {customOpen && (
-          <div className="custom-range-panel">
-            <label className="custom-range-field">
-              <span className="custom-range-label">From</span>
-              <input type="date" className="date-input" value={draftStart} onChange={(e) => setDraftStart(e.target.value)} />
-            </label>
-            <span className="custom-range-arrow">→</span>
-            <label className="custom-range-field">
-              <span className="custom-range-label">To</span>
-              <input type="date" className="date-input" value={draftEnd} onChange={(e) => setDraftEnd(e.target.value)} />
-            </label>
-            <div className="custom-range-quick">
-              <button
-                className="quick-chip"
-                onClick={() => {
-                  setDraftStart(plugin.dateAdded.slice(0, 10));
-                  setDraftEnd(new Date().toISOString().slice(0, 10));
-                }}
-              >
-                Since release
-              </button>
-              <button
-                className="quick-chip"
-                onClick={() => {
-                  setDraftStart(`${new Date().getFullYear()}-01-01`);
-                  setDraftEnd(new Date().toISOString().slice(0, 10));
-                }}
-              >
-                This year
-              </button>
-            </div>
-            <div className="custom-range-actions">
-              {draftStart && draftEnd && draftStart > draftEnd && <span className="custom-range-hint error">Start date must be before end date</span>}
-              <button className="theme-toggle" onClick={() => setCustomOpen(false)}>
-                Cancel
-              </button>
-              <button className="legal-ok" disabled={!draftStart || !draftEnd || draftStart > draftEnd} onClick={applyCustom}>
-                Apply range
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div style={{ padding: "8px clamp(8px, 3vw, 20px) 14px" }}>
-          {filteredPoints && <TrendChart points={filteredPoints} metric={metric} unit={activeMetric.unit} chartType={chartType} />}
-        </div>
-      </div>
+      <TrendChart
+        points={points}
+        metric={metric}
+        scoreMetric={plugin.game === "runelite" ? "downloadsTotal" : "downloadsToday"}
+        metricLabel={activeMetric.label}
+        unit={activeMetric.unit}
+        pluginName={plugin.name}
+        initialParams={searchParams}
+        onParamsChange={handleChartParamsChange}
+        gameUpdates={gameUpdates}
+        specialEvents={specialEvents}
+        releases={releases}
+      />
 
       {showSimilarModal && (
         <div className="legal-overlay" onClick={() => setShowSimilarModal(false)}>
@@ -555,41 +456,8 @@ function initials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
-function downloadTrend(points: PluginTrendPoint[], pluginName: string, format: "csv" | "json") {
-  const slug = pluginName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-  let blob: Blob;
-  let filename: string;
-  if (format === "json") {
-    blob = new Blob([JSON.stringify(points, null, 2)], { type: "application/json" });
-    filename = `${slug}-trend.json`;
-  } else {
-    const header = "captured_at,downloads_total,downloads_today,subscribers_total";
-    const rows = points.map((p) => `${p.capturedAt},${p.downloadsTotal},${p.downloadsToday},${p.subscribersTotal}`);
-    blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv" });
-    filename = `${slug}-trend.csv`;
-  }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
-
-function CalendarIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 14 14">
-      <rect x="1.5" y="2.5" width="11" height="10" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
-      <path d="M1.5 6H12.5M4.5 1V4M9.5 1V4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-    </svg>
-  );
 }
 
 function ThumbUpIcon() {
@@ -632,20 +500,3 @@ function findPointNear(points: PluginTrendPoint[], daysAgo: number): PluginTrend
   return candidate ?? points[0];
 }
 
-function describeRange(preset: RangePreset, customStart: string, customEnd: string, points: PluginTrendPoint[]): string {
-  if (preset === "custom" && customStart && customEnd) {
-    return formatCustomRangeLabel(customStart, customEnd, true);
-  }
-  const first = new Date(points[0].capturedAt);
-  const last = new Date(points[points.length - 1].capturedAt);
-  const days = Math.max(1, Math.round((last.getTime() - first.getTime()) / (24 * 60 * 60 * 1000)));
-  const fmt = (d: Date) => d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-  return `${fmt(first)} – ${fmt(last)} · ${days} days`;
-}
-
-function formatCustomRangeLabel(start: string, end: string, long = false): string {
-  const fmt = (s: string) => new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  if (!long) return `${fmt(start)} – ${fmt(end)}`;
-  const days = Math.max(1, Math.round((new Date(end).getTime() - new Date(start).getTime()) / (24 * 60 * 60 * 1000)));
-  return `${fmt(start)} – ${fmt(end)} · ${days} days`;
-}

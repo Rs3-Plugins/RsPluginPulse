@@ -68,6 +68,25 @@ export interface PluginTrendPoint {
   downloadsTotal: number;
   downloadsToday: number;
   subscribersTotal: number;
+  dateUpdated: string | null;
+}
+
+export interface GameUpdate {
+  id: number;
+  game: Game;
+  title: string;
+  date: string;
+  url: string;
+  wikiUrl: string;
+}
+
+export interface SpecialEvent {
+  id: number;
+  game: Game;
+  title: string;
+  start: string;
+  end: string | null;
+  url: string | null;
 }
 
 export interface CoAuthor {
@@ -234,6 +253,8 @@ export interface CompareItem {
   name: string;
   sub: string;
   series: number[];
+  // Only populated for type "plugin" -- see CompareItem in packages/db/src/types.ts.
+  releases?: (string | null)[];
   stats: CompareItemStats;
 }
 
@@ -282,6 +303,39 @@ export function getPluginTrend(id: string | number, game: Game = "runescape") {
   return getJson<{ pluginId: number; plugin: PluginMeta; trend: PluginTrendPoint[] }>(
     `/api/plugins/${encodeURIComponent(id)}/trend?game=${game}`,
   );
+}
+
+// "unavailable" is the plugin-hub bot pulling a broken plugin, not a real
+// content/version change -- resolveReleases (trendAnnotations.ts) filters
+// these out before anything reaches the chart.
+export type PluginReleaseKind = "update" | "unavailable";
+
+export interface PluginRelease {
+  id: number;
+  pluginId: number;
+  source: "modio" | "plugin-hub";
+  kind: PluginReleaseKind;
+  releasedAt: string;
+  version: string | null;
+  changelog: string | null;
+  url: string | null;
+}
+
+export function getPluginReleases(id: string | number, game: Game = "runescape") {
+  return getJson<{ releases: PluginRelease[] }>(`/api/plugins/${encodeURIComponent(id)}/releases?game=${game}`);
+}
+
+// Batch form for the Compare page -- up to 4 plugin ids at once.
+export function getPluginReleasesBatch(ids: number[]) {
+  return getJson<{ releases: Record<number, PluginRelease[]> }>(`/api/plugins/releases?ids=${ids.join(",")}`);
+}
+
+export function getGameUpdates(game: Game, from: string, to: string) {
+  return getJson<{ updates: GameUpdate[] }>(`/api/game-updates?game=${game}&from=${from}&to=${to}`);
+}
+
+export function getSpecialEvents(game: Game, from: string, to: string) {
+  return getJson<{ events: SpecialEvent[] }>(`/api/special-events?game=${game}&from=${from}&to=${to}`);
 }
 
 export function getAuthorProfile(id: string | number, game: Game = "runescape") {
