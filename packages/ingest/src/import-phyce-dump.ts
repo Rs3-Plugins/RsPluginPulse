@@ -191,7 +191,26 @@ async function main() {
   console.log(`  ${existingHours.size} (plugin, hour) pairs already covered -- these will be skipped`);
 
   const today = new Date().toISOString().slice(0, 10);
-  const lastOfHour = new Map<string, { pluginId: number; capturedAt: string; count: number }>();
+  // Hour-level dedup means a sparsely-covered catalog (e.g. a VPS whose
+  // ingest timer only started recently) can have nearly every row in a
+  // multi-GB dump be "pending" at once -- holding millions of full row
+  // objects in memory until the very end OOMs. `pending` is flushed to the
+  // DB (and cleared) every FLUSH_EVERY rows to keep peak memory bounded
+  // regardless of dump size; `flushedKeys` is just the (cheap) key strings
+  // of everything already written, so a hour seen again later in the file
+  // is still correctly skipped instead of double-inserted.
+  const FLUSH_EVERY = 200_000;
+  const flushedKeys = new Set<string>();
+  let pending = new Map<string, { pluginId: number; capturedAt: string; count: number }>();
+  let inserted = 0;
+
+  async function flushPending() {
+    if (pending.size === 0) return;
+    const toInsert = Array.from(pending.values());
+    for (const key of pending.keys()) flushedKeys.add(key);
+    pending = new Map();
+    inserted += await insertRows(pool, toInsert);
+  }
 
   console.log("streaming the dump's plugin_installs rows (this is the slow part -- a 2-3GB dump takes a few minutes)...");
   let lineCount = 0;
@@ -211,16 +230,14 @@ async function main() {
     matchedCount++;
     const hour = time.slice(0, 2);
     const key = `${ourId}|${day}T${hour}`;
-    if (existingHours.has(key)) continue;
-    lastOfHour.set(key, { pluginId: ourId, capturedAt: `${day}T${time}Z`, count });
-    if (lineCount % 5_000_000 === 0) console.log(`  ...${lineCount.toLocaleString()} lines scanned, ${lastOfHour.size.toLocaleString()} pending`);
+    if (existingHours.has(key) || flushedKeys.has(key)) continue;
+    pending.set(key, { pluginId: ourId, capturedAt: `${day}T${time}Z`, count });
+    if (pending.size >= FLUSH_EVERY) await flushPending();
+    if (lineCount % 5_000_000 === 0) console.log(`  ...${lineCount.toLocaleString()} lines scanned, ${inserted.toLocaleString()} inserted so far`);
   }
+  await flushPending();
   console.log(`  scanned ${lineCount.toLocaleString()} lines, ${matchedCount.toLocaleString()} matched our catalog`);
-
-  const toInsert = Array.from(lastOfHour.values());
-  console.log(`inserting ${toInsert.length.toLocaleString()} candidate (plugin, hour) snapshots from the dump...`);
-  const inserted = await insertRows(pool, toInsert);
-  console.log(`  done, ${inserted.toLocaleString()} were actually new (the rest already existed)`);
+  console.log(`  done, ${inserted.toLocaleString()} new (plugin, hour) snapshots inserted from the dump`);
 
   console.log("\ncatching up to now via phyce's /plugins endpoint (a single request, current state for every plugin)...");
   const res = await fetch("https://api-runelite.phyce.dev/plugins");
