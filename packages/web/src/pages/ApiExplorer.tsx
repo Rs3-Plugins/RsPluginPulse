@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { API_BASE, getTopAuthors, getTopPlugins, type AuthorLeaderboardRow, type PluginLeaderboardRow } from "../api";
+import { API_BASE, getTopAuthors, getTopPlugins, search, type AuthorLeaderboardRow, type PluginLeaderboardRow } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Dropdown } from "../components/Dropdown";
 import { PluginAuthorPicker, type PickerItem } from "../components/PluginAuthorPicker";
 import { useGame } from "../context/GameContext";
+import { authorHref, pluginHref } from "../lib/links";
+import { usePageMeta } from "../hooks/usePageMeta";
 
 type ParamType = "enum" | "int" | "string";
 type Tab = "body" | "headers" | "curl" | "fetch";
@@ -73,7 +75,7 @@ interface Token {
 
 const PERIOD_OPTIONS = ["alltime", "hot", "weekly", "monthly"];
 // osrs isn't ingested yet -- same reasoning as hiding it from the site nav.
-const GAME_OPTIONS = ["rs3", "runelite"];
+const GAME_OPTIONS = ["runescape", "runelite"];
 const MAX_LINES = 1200;
 const TAB_LABELS: { key: Tab; label: string }[] = [
   { key: "body", label: "Body" },
@@ -178,7 +180,7 @@ const ENDPOINTS: EndpointDef[] = [
     path: "/api/status",
     title: "Status",
     desc: "Timestamp of the most recent ingest snapshot — what the header's “updated N min ago” label is built from.",
-    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's ingest to check." }],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game's ingest to check." }],
   },
   {
     key: "search",
@@ -187,7 +189,7 @@ const ENDPOINTS: EndpointDef[] = [
     desc: "Plugins and authors matching a query, ranked by name match quality then total downloads. An empty query returns the top 5 plugins and top 3 authors by weekly gain (\"trending\") — this is what the header search box uses.",
     queryParams: [
       { name: "q", type: "string", placeholder: "e.g. xp", desc: "Search text. Empty returns trending plugins/authors instead." },
-      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's catalog to search." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game's catalog to search." },
       { name: "limit", type: "int", default: "6", desc: "Max plugin rows to return (authors scale down proportionally), max 20." },
     ],
   },
@@ -205,7 +207,7 @@ const ENDPOINTS: EndpointDef[] = [
         desc: "alltime = lifetime downloads, hot = downloads today, weekly/monthly = downloads gained.",
       },
       { name: "limit", type: "int", default: "50", desc: "Rows to return, max 10000." },
-      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's catalog to rank." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game's catalog to rank." },
     ],
   },
   {
@@ -222,7 +224,7 @@ const ENDPOINTS: EndpointDef[] = [
         desc: "Same semantics as the plugin leaderboard, summed across each author's plugins.",
       },
       { name: "limit", type: "int", default: "50", desc: "Rows to return, max 10000." },
-      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's catalog to rank." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game's catalog to rank." },
     ],
   },
   {
@@ -232,7 +234,7 @@ const ENDPOINTS: EndpointDef[] = [
     desc: "Most recently added plugins, newest first.",
     queryParams: [
       { name: "limit", type: "int", default: "50", desc: "Rows to return, max 10000." },
-      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's catalog to list." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game's catalog to list." },
     ],
   },
   {
@@ -243,7 +245,7 @@ const ENDPOINTS: EndpointDef[] = [
     queryParams: [
       { name: "limit", type: "int", default: "5", desc: "Rows to return, max 100." },
       { name: "days", type: "int", default: "7", desc: "Window size in days, 1–365." },
-      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's catalog to rank." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game's catalog to rank." },
     ],
   },
   {
@@ -251,23 +253,37 @@ const ENDPOINTS: EndpointDef[] = [
     path: "/api/plugins/random",
     title: "Random plugin",
     desc: "A random plugin id — powers the header's Randomizer button.",
-    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game to pick from." }],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game to pick from." }],
+  },
+  {
+    key: "plugin-info",
+    path: "/api/plugins/{id}",
+    title: "Plugin info",
+    desc: "Basic plugin metadata plus its current stats (downloads/installs, subscribers, today) -- no snapshot history. Use /trend below if you need the full history.",
+    pathParams: [
+      { name: "id", type: "int", required: true, desc: "Plugin id or name slug (e.g. 117hd). Search by name below.", pickerKind: "plugin" },
+    ],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Only needed when id is a slug (slugs are unique per game)." }],
   },
   {
     key: "plugin-trend",
     path: "/api/plugins/{id}/trend",
     title: "Plugin trend",
     desc: "Plugin metadata plus its full downloads/subscribers snapshot history.",
-    pathParams: [{ name: "id", type: "int", required: true, desc: "Plugin id. Search by name below.", pickerKind: "plugin" }],
-    queryParams: [],
+    pathParams: [
+      { name: "id", type: "int", required: true, desc: "Plugin id or name slug (e.g. 117hd). Search by name below.", pickerKind: "plugin" },
+    ],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Only needed when id is a slug (slugs are unique per game)." }],
   },
   {
     key: "author-profile",
     path: "/api/authors/{id}",
     title: "Author profile",
-    desc: "Aggregated totals, ranks, and plugin list for an author.",
-    pathParams: [{ name: "id", type: "int", required: true, desc: "Author id. Search by name below.", pickerKind: "author" }],
-    queryParams: [],
+    desc: "Aggregated totals, ranks, and plugin list for an author -- this already covers \"basic info\" for an author (installs/downloads, subscribers, weekly gain, plugin count).",
+    pathParams: [
+      { name: "id", type: "int", required: true, desc: "Author id or name slug (e.g. jin-jiyunsun). Search by name below.", pickerKind: "author" },
+    ],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Only needed when id is a slug (slugs are unique per game)." }],
   },
   {
     key: "badge",
@@ -276,7 +292,13 @@ const ENDPOINTS: EndpointDef[] = [
     desc: "shields.io endpoint-badge JSON. Point img.shields.io/endpoint?url= at this URL to get a badge that updates itself — this is what the Badge builder tab uses.",
     pathParams: [
       { name: "type", type: "enum", options: ["plugin", "author"], default: "plugin", required: true, desc: "plugin or author." },
-      { name: "key", type: "int", required: true, desc: "Plugin or author id, matching type above. Search by name below.", pickerKindFrom: "type" },
+      {
+        name: "key",
+        type: "int",
+        required: true,
+        desc: "Plugin or author id or name slug, matching type above. Search by name below.",
+        pickerKindFrom: "type",
+      },
       {
         name: "metric",
         type: "enum",
@@ -286,14 +308,25 @@ const ENDPOINTS: EndpointDef[] = [
         desc: "Value on the badge. subscribers/month are plugin-only, plugins is author-only.",
       },
     ],
-    queryParams: [],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Only needed when key is a slug (slugs are unique per game)." }],
+  },
+  {
+    key: "resolve",
+    path: "/api/resolve/{type}/{key}",
+    title: "Resolve slug to id",
+    desc: "Looks up a plugin or author's numeric id from its pretty-URL slug (e.g. 117hd). A numeric id passed in resolves straight through, so this also works as a plain existence check.",
+    pathParams: [
+      { name: "type", type: "enum", options: ["plugin", "author"], default: "plugin", required: true, desc: "plugin or author." },
+      { name: "key", type: "int", required: true, desc: "Plugin or author id or name slug, matching type above. Search by name below.", pickerKindFrom: "type" },
+    ],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Only needed when key is a slug (slugs are unique per game)." }],
   },
   {
     key: "stats",
     path: "/api/stats",
     title: "Site stats (summary)",
     desc: "A small summary: plugin/author counts and lifetime downloads. Use Stats overview below for the full dashboard payload.",
-    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game to summarize." }],
+    queryParams: [{ name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game to summarize." }],
   },
   {
     key: "stats-overview",
@@ -302,7 +335,7 @@ const ENDPOINTS: EndpointDef[] = [
     desc: "Everything the Stats page's Overview tab renders: daily download totals, fastest-growing plugins, and newest releases. Categories are a separate paginated endpoint below.",
     queryParams: [
       { name: "range", type: "enum", options: ["30", "90", "365"], default: "90", desc: "Visible window in days for the daily chart." },
-      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game to summarize." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game to summarize." },
     ],
   },
   {
@@ -313,7 +346,7 @@ const ENDPOINTS: EndpointDef[] = [
     queryParams: [
       { name: "page", type: "int", default: "1", desc: "1-based page number." },
       { name: "pageSize", type: "int", default: "10", desc: "Rows per page, max 100." },
-      { name: "game", type: "enum", options: GAME_OPTIONS, default: "rs3", desc: "Which game's tag cloud to read." },
+      { name: "game", type: "enum", options: GAME_OPTIONS, default: "runescape", desc: "Which game's tag cloud to read." },
     ],
   },
   {
@@ -391,6 +424,12 @@ const TOKEN_CLASS_NAME: Record<TokenClass, string> = {
 export function ApiExplorer() {
   const { game } = useGame();
   const [searchParams] = useSearchParams();
+
+  usePageMeta({
+    title: "API — RuneScape PluginPulse",
+    description: "A free, public JSON API for RuneScape and RuneLite plugin download/install stats, leaderboards and author data, plus a Badge and Embed Card builder.",
+    canonicalPath: game === "runescape" ? "/api" : `/api?game=${game}`,
+  });
   const [devTab, setDevTab] = useState<DevTab>(() => initialDevTab(searchParams));
   const [activeKey, setActiveKey] = useState(ENDPOINTS[0].key);
   const [paramsByEndpoint, setParamsByEndpoint] = useState<Record<string, Record<string, string>>>({});
@@ -446,7 +485,7 @@ export function ApiExplorer() {
     for (const p of allParams) {
       // A "game" param defaults to whatever game the site is currently
       // scoped to, so the example request matches what you're looking at
-      // instead of always starting from rs3.
+      // instead of always starting from runescape.
       const fallback = p.name === "game" ? game : p.default;
       out[p.name] = current[p.name] ?? fallback ?? "";
     }
@@ -624,8 +663,8 @@ export function ApiExplorer() {
       if ((values[p.name] ?? "").trim() !== "") continue;
       const list = kind === "plugin" ? pluginList : authorList;
       if (!list || list.length === 0) continue;
-      const firstId = kind === "plugin" ? (list as PluginLeaderboardRow[])[0].id : (list as AuthorLeaderboardRow[])[0].authorId;
-      setParam(p.name, String(firstId));
+      const firstNameId = kind === "plugin" ? (list as PluginLeaderboardRow[])[0].nameId : (list as AuthorLeaderboardRow[])[0].nameId;
+      setParam(p.name, firstNameId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devTab, endpoint.key, pluginList, authorList]);
@@ -641,13 +680,43 @@ export function ApiExplorer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devTab, endpoint.key, values.type]);
 
-  const pluginItems: PickerItem[] = (pluginList ?? []).map((p) => ({ id: p.id, name: p.name, sub: `${p.authorName} · ${p.value.toLocaleString()} downloads` }));
+  const pluginItems: PickerItem[] = (pluginList ?? []).map((p) => ({
+    id: p.id,
+    nameId: p.nameId,
+    name: p.name,
+    sub: `${p.authorName} · ${p.value.toLocaleString()} downloads`,
+  }));
   const authorItems: PickerItem[] = (authorList ?? []).map((a) => ({
     id: a.authorId,
+    nameId: a.nameId,
     name: a.authorName,
     sub: `${a.pluginCount} plugin${a.pluginCount === 1 ? "" : "s"}`,
     avatarUrl: a.avatarUrl,
   }));
+
+  // Falls back to the real /api/search endpoint (full catalog) once the
+  // picker's local, capped candidate list doesn't have a match -- see
+  // PluginAuthorPicker's onSearch.
+  const searchPlugins = useCallback(
+    (q: string) =>
+      search(q, game, 20).then((r) =>
+        r.plugins.map((p) => ({ id: p.id, nameId: p.nameId, name: p.name, sub: `${p.author} · ${p.total.toLocaleString()} downloads` })),
+      ),
+    [game],
+  );
+  const searchAuthors = useCallback(
+    (q: string) =>
+      search(q, game, 20).then((r) =>
+        r.authors.map((a) => ({
+          id: a.id,
+          nameId: a.nameId,
+          name: a.name,
+          sub: `${a.pluginCount} plugin${a.pluginCount === 1 ? "" : "s"}`,
+          avatarUrl: a.avatarUrl,
+        })),
+      ),
+    [game],
+  );
 
   const bKey = bType === "plugin" ? bPluginId : bAuthorId;
   const badgeEndpointUrl = bKey !== null ? `${API_BASE}/api/badge/${bType}/${bKey}/${bMetric}` : null;
@@ -662,9 +731,9 @@ export function ApiExplorer() {
   const badgeImgUrl = badgeEndpointUrl ? `https://img.shields.io/endpoint?${shieldsParams.toString()}` : null;
   const badgePageUrl =
     bType === "plugin" && bPluginId !== null
-      ? `${window.location.origin}/plugin/${bPluginId}`
+      ? `${window.location.origin}${pluginHref(pluginList?.find((p) => p.id === bPluginId)?.nameId ?? String(bPluginId), game)}`
       : bType === "author" && bAuthorId !== null
-        ? `${window.location.origin}/author/${bAuthorId}`
+        ? `${window.location.origin}${authorHref(authorList?.find((a) => a.authorId === bAuthorId)?.nameId ?? String(bAuthorId), game)}`
         : "";
   const badgeAltText = `PluginPulse ${BADGE_LABELS[bMetric]}`;
   const badgeMarkdown = badgeImgUrl ? `[![${badgeAltText}](${badgeImgUrl})](${badgePageUrl})` : "";
@@ -784,9 +853,9 @@ export function ApiExplorer() {
   const eShortImgUrl = eShortId ? `${API_BASE}/api/card/${eShortId}.png` : null;
   const ePageUrl =
     eType === "plugin" && ePluginId !== null
-      ? `${window.location.origin}/plugin/${ePluginId}`
+      ? `${window.location.origin}${pluginHref(pluginList?.find((p) => p.id === ePluginId)?.nameId ?? String(ePluginId), game)}`
       : eType === "author" && eAuthorId !== null
-        ? `${window.location.origin}/author/${eAuthorId}`
+        ? `${window.location.origin}${authorHref(authorList?.find((a) => a.authorId === eAuthorId)?.nameId ?? String(eAuthorId), game)}`
         : "";
   const eMarkdown = eShortImgUrl ? `[![PluginPulse stats card](${eShortImgUrl})](${ePageUrl})` : "";
   const eHtml = eShortImgUrl
@@ -866,6 +935,7 @@ export function ApiExplorer() {
                   onChange={(id) => (eType === "plugin" ? setEPluginId(id) : setEAuthorId(id))}
                   placeholder={eType === "plugin" ? "Select a plugin…" : "Select an author…"}
                   loading={eType === "plugin" ? pluginList === null : authorList === null}
+                  onSearch={eType === "plugin" ? searchPlugins : searchAuthors}
                 />
               </div>
 
@@ -1062,6 +1132,7 @@ export function ApiExplorer() {
                   onChange={(id) => (bType === "plugin" ? setBPluginId(id) : setBAuthorId(id))}
                   placeholder={bType === "plugin" ? "Select a plugin…" : "Select an author…"}
                   loading={bType === "plugin" ? pluginList === null : authorList === null}
+                  onSearch={bType === "plugin" ? searchPlugins : searchAuthors}
                 />
               </div>
 
@@ -1301,6 +1372,8 @@ export function ApiExplorer() {
                     pluginItems={pluginItems}
                     authorItems={authorItems}
                     pickerLoading={pluginList === null || authorList === null}
+                    searchPlugins={searchPlugins}
+                    searchAuthors={searchAuthors}
                   />
                 ))}
               </>
@@ -1324,6 +1397,8 @@ export function ApiExplorer() {
                     pluginItems={pluginItems}
                     authorItems={authorItems}
                     pickerLoading={pluginList === null || authorList === null}
+                    searchPlugins={searchPlugins}
+                    searchAuthors={searchAuthors}
                   />
                 ))}
               </>
@@ -1420,6 +1495,8 @@ function ParamRow({
   pluginItems,
   authorItems,
   pickerLoading,
+  searchPlugins,
+  searchAuthors,
 }: {
   param: ParamDef;
   value: string;
@@ -1428,6 +1505,8 @@ function ParamRow({
   pluginItems?: PickerItem[];
   authorItems?: PickerItem[];
   pickerLoading?: boolean;
+  searchPlugins?: (query: string) => Promise<PickerItem[]>;
+  searchAuthors?: (query: string) => Promise<PickerItem[]>;
 }) {
   const typeLabel = param.type === "enum" ? (param.options ?? []).join(" | ") : param.type;
   return (
@@ -1444,10 +1523,22 @@ function ParamRow({
         {pickerKind ? (
           <PluginAuthorPicker
             items={(pickerKind === "plugin" ? pluginItems : authorItems) ?? []}
-            value={value.trim() === "" ? null : Number(value)}
-            onChange={(id) => onChange(String(id))}
+            // The param's actual text value is the slug once something's
+            // picked (see onChange below) -- the picker's own `value` is
+            // still numeric (it drives which row shows a checkmark), so a
+            // slug has to be resolved back to its id here. A bare numeric
+            // id still typed by hand keeps working too.
+            value={(() => {
+              const trimmed = value.trim();
+              if (!trimmed) return null;
+              const items = (pickerKind === "plugin" ? pluginItems : authorItems) ?? [];
+              if (/^\d+$/.test(trimmed)) return Number(trimmed);
+              return items.find((i) => i.nameId === trimmed)?.id ?? null;
+            })()}
+            onChange={(_id, item) => onChange(item.nameId ?? String(item.id))}
             placeholder={pickerKind === "plugin" ? "Search plugins…" : "Search authors…"}
             loading={pickerLoading}
+            onSearch={pickerKind === "plugin" ? searchPlugins : searchAuthors}
           />
         ) : param.type === "enum" ? (
           <Dropdown value={value} options={(param.options ?? []).map((o) => ({ value: o, label: o }))} onChange={onChange} ariaLabel={param.name} />

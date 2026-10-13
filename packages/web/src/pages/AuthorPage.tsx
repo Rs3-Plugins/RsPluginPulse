@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { getAuthorProfile, getPluginTrend, type AuthorProfile } from "../api";
+import { API_BASE, getAuthorProfile, getPluginTrend, type AuthorProfile } from "../api";
 import { useGame, type Game } from "../context/GameContext";
+import { authorHref, pluginHref } from "../lib/links";
+import { slugifyTag as slugify } from "../lib/slug";
+import { usePageMeta } from "../hooks/usePageMeta";
 
 type SortKey = "downloads" | "week" | "subs" | "newest";
 
@@ -29,7 +32,7 @@ function parseSort(v: string | null): SortKey {
 
 export function AuthorPage() {
   const { id } = useParams<{ id: string }>();
-  const { setGame } = useGame();
+  const { game, setGame } = useGame();
   const [searchParams, setSearchParams] = useSearchParams();
   const [author, setAuthor] = useState<AuthorProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,13 +49,37 @@ export function AuthorPage() {
     if (!id) return;
     setAuthor(null);
     setError(null);
-    getAuthorProfile(Number(id))
+    getAuthorProfile(id, game)
       .then((res) => {
         setAuthor(res);
         setGame(res.game);
       })
       .catch((err) => setError(String(err)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, setGame]);
+
+  usePageMeta({
+    title: author ? `${author.authorName} — RuneScape PluginPulse` : "RuneScape PluginPulse",
+    description: author
+      ? `${author.pluginCount} plugin${author.pluginCount === 1 ? "" : "s"} · ${author.totals.downloadsTotal.toLocaleString()} total ${
+          author.game === "runelite" ? "installs" : "downloads"
+        } on RuneScape PluginPulse.`
+      : "Author plugin stats on RuneScape PluginPulse.",
+    canonicalPath: author ? authorHref(slugify(author.authorName), author.game as "runescape" | "osrs" | "runelite") : `/author/${id ?? ""}`,
+    image: author ? `${API_BASE}/api/card/author/${author.authorId}.png` : undefined,
+    jsonLd: author
+      ? {
+          "@context": "https://schema.org",
+          "@type": "ProfilePage",
+          mainEntity: {
+            "@type": "Person",
+            name: author.authorName,
+            image: author.authorAvatarUrl || undefined,
+            url: `https://rspluginpulse.com${authorHref(slugify(author.authorName), author.game as "runescape" | "osrs" | "runelite")}`,
+          },
+        }
+      : undefined,
+  });
 
   useEffect(() => {
     if (!author) return;
@@ -243,7 +270,7 @@ export function AuthorPage() {
         </div>
 
         {sortedPlugins.map((p, i) => (
-          <Link key={p.id} to={`/plugin/${p.id}`} className={`author-plugin-row ${author.game === "runelite" ? "single-metric" : ""}`}>
+          <Link key={p.id} to={pluginHref(p.nameId, game)} className={`author-plugin-row ${author.game === "runelite" ? "single-metric" : ""}`}>
             <span className="cell-rank">{i + 1}</span>
             <span className="author-plugin-name-col">
               <span className="author-plugin-name-row">

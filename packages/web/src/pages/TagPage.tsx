@@ -3,6 +3,8 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { getTopPlugins, type PluginLeaderboardRow } from "../api";
 import { useGame } from "../context/GameContext";
 import { slugifyTag } from "../lib/slug";
+import { authorHref, pluginHref } from "../lib/links";
+import { usePageMeta } from "../hooks/usePageMeta";
 
 export function TagPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -31,6 +33,14 @@ export function TagPage() {
     if (!plugins || !tagName) return [];
     return plugins.filter((p) => p.tags.includes(tagName)).sort((a, b) => b.value - a.value);
   }, [plugins, tagName]);
+
+  usePageMeta({
+    title: tagName ? `${tagName} plugins — RuneScape PluginPulse` : "RuneScape PluginPulse",
+    description: tagName
+      ? `${matches.length} plugin${matches.length === 1 ? "" : "s"} tagged "${tagName}" on RuneScape PluginPulse.`
+      : "Browse RuneScape and RuneLite plugins by tag.",
+    canonicalPath: game === "runescape" ? `/tags/${slug ?? ""}` : `/tags/${slug ?? ""}?game=${game}`,
+  });
 
   if (error) {
     return (
@@ -78,12 +88,12 @@ export function TagPage() {
             </div>
           )}
           {matches.map((p, i) => (
-            <div key={p.id} className="row-grid" onClick={() => navigate(`/plugin/${p.id}`)}>
+            <div key={p.id} className="row-grid" onClick={() => navigate(pluginHref(p.nameId, game))}>
               <span className={`cell-rank ${i < 3 ? "top" : ""}`}>{i + 1}</span>
-              <Link to={`/plugin/${p.id}`} className="cell-name" onClick={(e) => e.stopPropagation()}>
+              <Link to={pluginHref(p.nameId, game)} className="cell-name" onClick={(e) => e.stopPropagation()}>
                 {p.name}
               </Link>
-              <Link to={`/author/${p.authorId}`} className="cell-sub" onClick={(e) => e.stopPropagation()}>
+              <Link to={authorHref(p.authorNameId, game)} className="cell-sub" onClick={(e) => e.stopPropagation()}>
                 {p.authorName}
               </Link>
               <span className="cell-value">{p.value.toLocaleString()}</span>

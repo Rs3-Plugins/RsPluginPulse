@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
-export type Game = "rs3" | "osrs" | "runelite";
+export type Game = "runescape" | "osrs" | "runelite";
 
-const VALID_GAMES: Game[] = ["rs3", "osrs", "runelite"];
+const VALID_GAMES: Game[] = ["runescape", "osrs", "runelite"];
 
 const GameContext = createContext<{ game: Game; setGame: (g: Game) => void }>({
-  game: "rs3",
+  game: "runescape",
   setGame: () => {},
 });
 
@@ -17,7 +17,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     const fromUrl = new URLSearchParams(window.location.search).get("game");
     if (VALID_GAMES.includes(fromUrl as Game)) return fromUrl as Game;
     const stored = localStorage.getItem("game");
-    return VALID_GAMES.includes(stored as Game) ? (stored as Game) : "rs3";
+    return VALID_GAMES.includes(stored as Game) ? (stored as Game) : "runescape";
   });
 
   useEffect(() => {

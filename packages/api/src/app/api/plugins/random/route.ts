@@ -8,9 +8,9 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const game = parseGame(searchParams.get("game"));
 
-  const id = await getRandomPluginId(game);
-  if (id === null) {
+  const result = await getRandomPluginId(game);
+  if (result === null) {
     return jsonWithCors({ error: "no plugins found" }, { status: 404 });
   }
-  return jsonWithCors({ id });
+  return jsonWithCors(result);
 }

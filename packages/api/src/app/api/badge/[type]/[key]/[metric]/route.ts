@@ -1,6 +1,8 @@
 import { getAuthorProfile, getLatestSnapshotTime, getPlugin, getPluginRanks, getPluginTrend, type PluginTrendPoint } from "@rspluginpulse/db";
 import { CACHE_CEILING, remember, rememberBriefly } from "@/lib/cache";
 import { jsonWithCors, OPTIONS as corsOptions } from "@/lib/cors";
+import { parseGame } from "@/lib/game";
+import { resolveAuthor, resolvePlugin } from "@/lib/resolveEntity";
 
 export const OPTIONS = corsOptions;
 
@@ -58,33 +60,40 @@ function findPointNearDays(points: PluginTrendPoint[], daysAgo: number): PluginT
   return candidate;
 }
 
-export async function GET(_request: Request, { params }: { params: Promise<{ type: string; key: string; metric: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ type: string; key: string; metric: string }> }) {
   const { type, key, metric } = await params;
+  const { searchParams } = new URL(request.url);
+  const game = parseGame(searchParams.get("game"));
 
   if (type !== "plugin" && type !== "author") {
     return jsonWithCors({ error: { status: 400, message: "type must be one of: plugin, author" } }, { status: 400 });
   }
+  // Narrowing from the check above doesn't persist into the nested
+  // `function loadBadge` declaration below (a TS closure quirk -- narrowing
+  // only flows into inline expressions, not hoisted declarations), so it's
+  // re-asserted here once into an explicitly-typed local.
+  const entityType: "plugin" | "author" = type;
 
   const allowed: readonly string[] = type === "plugin" ? PLUGIN_METRICS : AUTHOR_METRICS;
   if (!allowed.includes(metric)) {
     return jsonWithCors({ error: { status: 400, message: `metric ${metric} is not available for ${type} badges`, allowed } }, { status: 400 });
   }
 
-  const id = Number(key);
-  if (!Number.isInteger(id)) {
-    return jsonWithCors({ error: { status: 400, message: "key must be a plugin or author id" } }, { status: 400 });
+  // `key` may be a numeric id or a pretty slug (game matters only for the
+  // slug path -- see resolveEntity.ts). This also uses the global
+  // (cross-game) freshness signal for the cache rather than paying for a
+  // lookup just to pick a cache key -- harmless, since an ingest for
+  // either game still only runs hourly either way.
+  const freshness = (await rememberBriefly("freshness:global", () => getLatestSnapshotTime())) ?? "none";
+
+  async function loadBadge(id: number) {
+    const resolved = await remember(`badge:${entityType}:${id}:${metric}`, CACHE_CEILING.BADGE, freshness, () => resolveBadgeValue(entityType, id, metric));
+    return resolved.found ? resolved : null;
   }
 
-  // The id's game isn't known until it's looked up inside resolveBadgeValue,
-  // so this uses the global (cross-game) freshness signal rather than
-  // paying for that lookup just to pick a cache key -- harmless, since an
-  // ingest for either game still only runs hourly either way.
-  const freshness = (await rememberBriefly("freshness:global", () => getLatestSnapshotTime())) ?? "none";
-  const resolved = await remember(`badge:${type}:${id}:${metric}`, CACHE_CEILING.BADGE, freshness, () =>
-    resolveBadgeValue(type, id, metric),
-  );
-  if (!resolved.found) {
-    return jsonWithCors({ error: { status: 404, message: `No ${type} with id ${id}` } }, { status: 404 });
+  const resolved = entityType === "plugin" ? await resolvePlugin(key, game, loadBadge) : await resolveAuthor(key, game, loadBadge);
+  if (!resolved) {
+    return jsonWithCors({ error: { status: 404, message: `No ${type} with id ${key}` } }, { status: 404 });
   }
 
   return jsonWithCors(

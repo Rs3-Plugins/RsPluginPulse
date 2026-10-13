@@ -1,7 +1,9 @@
-import { getEmbedCard, type EmbedCardOptions, type EmbedCardType } from "@rspluginpulse/db";
+import { getAuthorProfile, getEmbedCard, getPlugin, type EmbedCardOptions, type EmbedCardType } from "@rspluginpulse/db";
 import { getCachedCard, setCachedCard } from "@/lib/cardCache";
 import { renderCardPng } from "@/lib/cardSvg";
 import { jsonWithCors, OPTIONS as corsOptions, pngWithCors } from "@/lib/cors";
+import { parseGame } from "@/lib/game";
+import { resolveAuthor, resolvePlugin } from "@/lib/resolveEntity";
 
 export const OPTIONS = corsOptions;
 
@@ -71,6 +73,7 @@ function cacheKeyFor(type: EmbedCardType, entityId: number, options: EmbedCardOp
 export async function GET(request: Request, { params }: { params: Promise<{ slug: string[] }> }) {
   const { slug } = await params;
   const { searchParams } = new URL(request.url);
+  const game = parseGame(searchParams.get("game"));
 
   let type: EmbedCardType;
   let entityId: number;
@@ -81,9 +84,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
     if (rawType !== "plugin" && rawType !== "author") {
       return jsonWithCors({ error: { status: 400, message: "type must be one of: plugin, author" } }, { status: 400 });
     }
-    const id = Number(rawKey.replace(/\.(svg|png)$/i, ""));
-    if (!Number.isInteger(id)) {
-      return jsonWithCors({ error: { status: 400, message: "key must be a plugin or author id" } }, { status: 400 });
+    // `rawKey` may be a numeric id or a pretty slug -- see resolveEntity.ts.
+    const key = rawKey.replace(/\.(svg|png)$/i, "");
+    const id =
+      rawType === "plugin"
+        ? await resolvePlugin(key, game, async (pluginId) => ((await getPlugin(pluginId)) ? pluginId : null))
+        : await resolveAuthor(key, game, async (authorId) => ((await getAuthorProfile(authorId)) ? authorId : null));
+    if (id === null) {
+      return jsonWithCors({ error: { status: 404, message: `No ${rawType} found for "${key}"` } }, { status: 404 });
     }
     type = rawType;
     entityId = id;

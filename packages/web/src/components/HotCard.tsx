@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { getPluginTrend, getTopAuthors, getTopPlugins, type Period } from "../api";
 import { useGame } from "../context/GameContext";
 import { Dropdown } from "./Dropdown";
+import { authorHref, pluginHref } from "../lib/links";
 
 type HotPeriod = "hot" | "weekly" | "monthly";
 
@@ -15,6 +16,7 @@ const HOT_PERIOD_OPTIONS: { key: HotPeriod; label: string }[] = [
 interface HotItem {
   rank: number;
   id: number;
+  nameId: string;
   name: string;
   sub: string;
   value: number;
@@ -47,6 +49,7 @@ export function HotCard({ title, kind, onSeeAll }: Props) {
           top.map((p, i) => ({
             rank: i + 1,
             id: p.id,
+            nameId: p.nameId,
             name: p.name,
             sub: p.authorName,
             value: p.value,
@@ -61,6 +64,7 @@ export function HotCard({ title, kind, onSeeAll }: Props) {
           top.map((a, i) => ({
             rank: i + 1,
             id: a.authorId,
+            nameId: a.nameId,
             name: a.authorName,
             sub: `${a.pluginCount} plugin${a.pluginCount === 1 ? "" : "s"}`,
             value: a.value,
@@ -109,7 +113,7 @@ export function HotCard({ title, kind, onSeeAll }: Props) {
         <div
           key={item.id}
           className={`hot-row ${item.spark === null ? "no-spark" : ""}`}
-          onClick={() => navigate(kind === "plugins" ? `/plugin/${item.id}` : `/author/${item.id}`)}
+          onClick={() => navigate(kind === "plugins" ? pluginHref(item.nameId, game) : authorHref(item.nameId, game))}
         >
           <span className="hot-rank">{item.rank}</span>
           <span className="hot-name-col">

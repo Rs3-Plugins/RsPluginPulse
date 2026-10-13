@@ -17,7 +17,7 @@ export function OsrsComingSoon() {
           <a href="https://discord.gg/gHN7c9B5FU" target="_blank" rel="noopener" className="cta-pill">
             Get notified on Discord ↗
           </a>
-          <button className="theme-toggle" onClick={() => setGame("rs3")}>
+          <button className="theme-toggle" onClick={() => setGame("runescape")}>
             Back to RuneScape
           </button>
         </div>

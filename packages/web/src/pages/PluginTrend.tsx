@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { getPluginTrend, getTopPlugins, type PluginLeaderboardRow, type PluginMeta, type PluginTrendPoint } from "../api";
+import { API_BASE, getPluginTrend, getTopPlugins, type PluginLeaderboardRow, type PluginMeta, type PluginTrendPoint } from "../api";
 import { TrendChart, trendMetrics, type ChartType, type TrendMetric } from "../components/TrendChart";
 import { useGame } from "../context/GameContext";
 import { AvatarImg } from "../components/AvatarImg";
 import { slugifyTag } from "../lib/slug";
+import { authorHref, pluginHref } from "../lib/links";
+import { usePageMeta } from "../hooks/usePageMeta";
 
 type RangePreset = "7d" | "30d" | "90d" | "all" | "custom";
 
@@ -36,7 +38,7 @@ function parsePreset(v: string | null): RangePreset {
 
 export function PluginTrend() {
   const { id } = useParams<{ id: string }>();
-  const { setGame } = useGame();
+  const { game, setGame } = useGame();
   const [searchParams, setSearchParams] = useSearchParams();
   const [plugin, setPlugin] = useState<PluginMeta | null>(null);
   const [points, setPoints] = useState<PluginTrendPoint[] | null>(null);
@@ -84,7 +86,7 @@ export function PluginTrend() {
 
   useEffect(() => {
     if (!id) return;
-    getPluginTrend(Number(id))
+    getPluginTrend(id, game)
       .then((res) => {
         setPlugin(res.plugin);
         setPoints(res.trend);
@@ -92,7 +94,7 @@ export function PluginTrend() {
 
         getTopPlugins("hot", res.plugin.game, 15)
           .then((hotRes) => {
-            const rank = hotRes.plugins.findIndex((p) => p.id === Number(id));
+            const rank = hotRes.plugins.findIndex((p) => p.id === res.pluginId);
             setHotRank(rank !== -1 && rank < 10 ? rank + 1 : null);
             setHotPlugins(hotRes.plugins);
           })
@@ -103,7 +105,38 @@ export function PluginTrend() {
           .catch(() => setAllPlugins([]));
       })
       .catch((err) => setError(String(err)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, setGame]);
+
+  const latestPoint = points && points.length > 0 ? points[points.length - 1] : null;
+  usePageMeta({
+    title: plugin ? `${plugin.name} by ${plugin.authorName} — RuneScape PluginPulse` : "RuneScape PluginPulse",
+    description: plugin
+      ? `${plugin.summary || "Download trends and stats"}${
+          latestPoint ? ` — ${latestPoint.downloadsTotal.toLocaleString()} ${plugin.game === "runelite" ? "installs" : "downloads"}.` : "."
+        }`
+      : "Plugin download trends and stats on RuneScape PluginPulse.",
+    canonicalPath: plugin ? (plugin.game === "runescape" ? `/plugin/${plugin.nameId}` : `/plugin/${plugin.nameId}?game=${plugin.game}`) : `/plugin/${id ?? ""}`,
+    image: plugin ? `${API_BASE}/api/card/plugin/${plugin.id}.png` : undefined,
+    jsonLd:
+      plugin && latestPoint
+        ? {
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            name: plugin.name,
+            author: { "@type": "Person", name: plugin.authorName },
+            applicationCategory: "GameApplication",
+            operatingSystem: plugin.game === "runelite" ? "RuneLite" : "RuneScape",
+            description: plugin.summary || undefined,
+            url: `https://rspluginpulse.com${pluginHref(plugin.nameId, plugin.game as "runescape" | "osrs" | "runelite")}`,
+            interactionStatistic: {
+              "@type": "InteractionCounter",
+              interactionType: "https://schema.org/InstallAction",
+              userInteractionCount: latestPoint.downloadsTotal,
+            },
+          }
+        : undefined,
+  });
 
   const allTimeRank = useMemo(() => {
     if (!allPlugins || !plugin) return null;
@@ -300,7 +333,7 @@ export function PluginTrend() {
                         onMouseLeave={() => setHoveredAuthorIndex(null)}
                       >
                         {i > 0 && ", "}
-                        <Link to={`/author/${entry.authorId}`} className="plugin-author-name-link">
+                        <Link to={authorHref(entry.nameId, game)} className="plugin-author-name-link">
                           {entry.name}
                         </Link>
                       </span>
@@ -308,7 +341,7 @@ export function PluginTrend() {
                   </span>
                 </div>
               ) : (
-                <Link to={`/author/${plugin.authorId}`} className="plugin-author-chip">
+                <Link to={authorHref(plugin.authorNameId, game)} className="plugin-author-chip">
                   <span className="plugin-author-avatar">
                     {plugin.authorAvatarUrl ? (
                       <img src={plugin.authorAvatarUrl} alt="" className="plugin-author-avatar-img" />
@@ -503,7 +536,7 @@ export function PluginTrend() {
             </div>
             <div className="legal-body similar-plugins-modal-body">
               {similarPlugins.map(({ plugin: p, shared }) => (
-                <Link key={p.id} to={`/plugin/${p.id}`} className="similar-plugin-row" onClick={() => setShowSimilarModal(false)}>
+                <Link key={p.id} to={pluginHref(p.nameId, game)} className="similar-plugin-row" onClick={() => setShowSimilarModal(false)}>
                   <span className="similar-plugin-name">{p.name}</span>
                   <span className="similar-plugin-sub">
                     by {p.authorName} · {shared} shared tag{shared === 1 ? "" : "s"}
