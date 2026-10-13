@@ -88,9 +88,23 @@ export interface PluginTrendPoint {
   downloadsTotal: number;
   downloadsToday: number;
   subscribersTotal: number;
+  // The plugin's own upstream "last updated" value as of this snapshot, so
+  // a release/version update can be told apart from a game update -- null
+  // on snapshots taken before this was tracked (see schema.sql).
+  dateUpdated: string | null;
 }
 
 export type GameKey = "runescape" | "osrs" | "runelite";
+
+// Narrower than GameKey, used only by game_updates/special_events.
+// RuneLite and OSRS-via-mod.io are the same underlying game, just
+// different data sources, so both should be annotated by the same wiki
+// updates/special events rather than tracked as separate "game" scopes --
+// everything else (plugins, plugin_snapshots, external_id_map, the
+// GameSwitcher/UI, etc.) keeps using the full three-way GameKey unchanged.
+// getGameUpdates/getSpecialEvents map an incoming "runelite"/"osrs"
+// GameKey onto "oldschool" before querying either table.
+export type AnnotationGameKey = "runescape" | "oldschool";
 
 export interface CoAuthorIngest {
   authorId: number;
@@ -250,6 +264,41 @@ export interface StatsOverview {
   newReleases: NewReleaseRow[];
 }
 
+export interface GameUpdate {
+  id: number;
+  game: AnnotationGameKey;
+  title: string;
+  date: string;
+  url: string;
+  wikiUrl: string;
+}
+
+export interface GameUpdateInput {
+  game: AnnotationGameKey;
+  wikiPageId: number;
+  title: string;
+  date: string;
+  url: string;
+  wikiUrl: string;
+}
+
+export interface SpecialEvent {
+  id: number;
+  game: AnnotationGameKey;
+  title: string;
+  start: string;
+  end: string | null;
+  url: string | null;
+}
+
+export interface SpecialEventInput {
+  game: AnnotationGameKey;
+  title: string;
+  start: string;
+  end: string | null;
+  url: string | null;
+}
+
 export type CompareType = "plugin" | "author";
 export type CompareMetric = "total" | "daily" | "subs";
 export type CompareRange = 30 | 90 | "all";
@@ -272,6 +321,11 @@ export interface CompareItem {
   name: string;
   sub: string;
   series: number[];
+  // Per-day ISO dateUpdated snapshot, aligned 1:1 with `series` -- only
+  // populated for type "plugin" (an author's releases don't collapse into
+  // one series, see getCompareData). A day-to-day change in this value
+  // marks a plugin release ("Plugin updates" in the Compare chart).
+  releases?: (string | null)[];
   stats: CompareItemStats;
 }
 

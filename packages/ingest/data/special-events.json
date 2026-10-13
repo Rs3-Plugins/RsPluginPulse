@@ -1,0 +1,65 @@
+[
+  {
+    "game": "oldschool",
+    "title": "Trailblazer League",
+    "start": "2020-10-28",
+    "end": "2021-01-06",
+    "url": "https://oldschool.runescape.wiki/w/Trailblazer_League_(2020)"
+  },
+  {
+    "game": "oldschool",
+    "title": "Shattered Relics League",
+    "start": "2022-01-19",
+    "end": "2022-03-16",
+    "url": "https://oldschool.runescape.wiki/w/Shattered_Relics_League"
+  },
+  {
+    "game": "oldschool",
+    "title": "Fresh Start Worlds",
+    "start": "2022-10-19",
+    "end": "2023-04-18",
+    "url": "https://oldschool.runescape.wiki/w/Fresh_Start_Worlds"
+  },
+  {
+    "game": "oldschool",
+    "title": "Quest Speed Running",
+    "start": "2022-10-12",
+    "end": "2022-10-14",
+    "url": "https://oldschool.runescape.wiki/w/Quest_Speedrunning"
+  },
+  {
+    "game": "oldschool",
+    "title": "Trailblazer Reloaded League",
+    "start": "2023-11-15",
+    "end": "2024-01-10",
+    "url": "https://oldschool.runescape.wiki/w/Trailblazer_Reloaded_League"
+  },
+  {
+    "game": "oldschool",
+    "title": "Raging Echoes League",
+    "start": "2024-11-27",
+    "end": "2025-01-22",
+    "url": "https://oldschool.runescape.wiki/w/Raging_Echoes_League"
+  },
+  {
+    "game": "oldschool",
+    "title": "Grid Master",
+    "start": "2025-10-15",
+    "end": "2025-11-12",
+    "url": "https://oldschool.runescape.wiki/w/Grid_Master"
+  },
+  {
+    "game": "oldschool",
+    "title": "Demonic Pacts League",
+    "start": "2026-04-15",
+    "end": "2026-06-11",
+    "url": "https://oldschool.runescape.wiki/w/Demonic_Pacts_League"
+  },
+  {
+    "game": "runescape",
+    "title": "Plugin Beta",
+    "start": "2026-10-06",
+    "end": null,
+    "url": "https://runescape.wiki/w/Plugin_beta"
+  }
+]

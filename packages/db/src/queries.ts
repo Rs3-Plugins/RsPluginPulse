@@ -2,6 +2,7 @@ import { randomBytes } from "crypto";
 import { getPool } from "./client";
 import { normalizeSlug, slugify } from "./slug";
 import type {
+  AnnotationGameKey,
   AuthorLeaderboardRow,
   AuthorProfile,
   CategoryStat,
@@ -16,6 +17,8 @@ import type {
   EmbedCardOptions,
   EmbedCardType,
   FastestGrowingPlugin,
+  GameUpdate,
+  GameUpdateInput,
   GrowthSparkRow,
   IngestedMod,
   NewestPluginRow,
@@ -25,6 +28,8 @@ import type {
   PluginTrendPoint,
   SearchResult,
   SiteStats,
+  SpecialEvent,
+  SpecialEventInput,
   StatsOverview,
 } from "./types";
 
@@ -307,10 +312,10 @@ export async function upsertPluginsAndSnapshot(mods: IngestedMod[], capturedAt: 
         ],
       );
       await client.query(
-        `INSERT INTO plugin_snapshots (plugin_id, captured_at, downloads_total, downloads_today, subscribers_total, popularity_rank_position, game)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO plugin_snapshots (plugin_id, captured_at, downloads_total, downloads_today, subscribers_total, popularity_rank_position, game, date_updated)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8))
          ON CONFLICT (plugin_id, captured_at) DO NOTHING`,
-        [mod.id, capturedAt, mod.downloadsTotal, mod.downloadsToday, mod.subscribersTotal, mod.popularityRankPosition, mod.game],
+        [mod.id, capturedAt, mod.downloadsTotal, mod.downloadsToday, mod.subscribersTotal, mod.popularityRankPosition, mod.game, mod.dateUpdated],
       );
 
       // Replace the roster wholesale each run -- cheap at this scale and
@@ -798,18 +803,49 @@ export async function getPluginInfo(pluginId: number): Promise<PluginInfo | null
   };
 }
 
+// Rolled up to one row per UTC calendar day (the trend chart's annotation
+// logic -- median-of-±5-*days*, a 7-*day* zoom floor, one calendar cell per
+// day -- needs daily granularity), even though ingest actually runs hourly
+// and plugin_snapshots is hourly-grain. Each day takes its last snapshot
+// strictly before the next day starts -- same "forward-fill the latest
+// known value onto each day" pattern as getDailySeriesByPlugin above, just
+// for a single plugin and also carrying date_updated through.
+//
+// The day is pulled out via to_char rather than letting node-postgres parse
+// the `date` column itself: pg's default type parser for `date` returns a
+// JS Date set to *local* midnight, not UTC midnight, which silently shifts
+// the day by one depending on the server's timezone -- the exact bug
+// already hit once this session parsing wiki update dates (see
+// packages/ingest/src/wikiUpdates.ts). Plain text sidesteps it entirely.
 export async function getPluginTrend(pluginId: number): Promise<PluginTrendPoint[]> {
   const pool = getPool();
   const { rows } = await pool.query(
-    `SELECT captured_at, downloads_total, downloads_today, subscribers_total
-     FROM plugin_snapshots WHERE plugin_id = $1 ORDER BY captured_at ASC`,
+    `WITH bounds AS (
+       SELECT (min(captured_at) AT TIME ZONE 'UTC')::date AS first_day,
+              (max(captured_at) AT TIME ZONE 'UTC')::date AS last_day
+       FROM plugin_snapshots WHERE plugin_id = $1
+     ),
+     days AS (
+       SELECT generate_series(first_day, last_day, interval '1 day')::date AS day FROM bounds
+     )
+     SELECT to_char(d.day, 'YYYY-MM-DD') AS day,
+            l.downloads_total, l.downloads_today, l.subscribers_total, l.date_updated
+     FROM days d
+     JOIN LATERAL (
+       SELECT downloads_total, downloads_today, subscribers_total, date_updated
+       FROM plugin_snapshots s
+       WHERE s.plugin_id = $1 AND (s.captured_at AT TIME ZONE 'UTC') < d.day + interval '1 day'
+       ORDER BY s.captured_at DESC LIMIT 1
+     ) l ON true
+     ORDER BY d.day`,
     [pluginId],
   );
   return rows.map((row) => ({
-    capturedAt: row.captured_at.toISOString(),
+    capturedAt: `${row.day}T00:00:00.000Z`,
     downloadsTotal: row.downloads_total,
     downloadsToday: row.downloads_today,
     subscribersTotal: row.subscribers_total,
+    dateUpdated: row.date_updated ? row.date_updated.toISOString() : null,
   }));
 }
 
@@ -905,6 +941,7 @@ interface DailySeriesPoint {
   total: number;
   today: number;
   subs: number;
+  release: string | null;
 }
 
 function daysAgoDate(n: number): Date {
@@ -956,11 +993,12 @@ async function getDailySeriesByPlugin(
      SELECT d.day, p.id AS plugin_id,
             COALESCE(l.downloads_total, 0) AS downloads_total,
             COALESCE(l.downloads_today, 0) AS downloads_today,
-            COALESCE(l.subscribers_total, 0) AS subscribers_total
+            COALESCE(l.subscribers_total, 0) AS subscribers_total,
+            l.date_updated
      FROM days d
      CROSS JOIN plugins p
      LEFT JOIN LATERAL (
-       SELECT downloads_total, downloads_today, subscribers_total
+       SELECT downloads_total, downloads_today, subscribers_total, date_updated
        FROM plugin_snapshots s
        WHERE s.plugin_id = p.id AND s.captured_at < d.day + interval '1 day'
        ORDER BY s.captured_at DESC LIMIT 1
@@ -978,6 +1016,7 @@ async function getDailySeriesByPlugin(
       total: Number(row.downloads_total),
       today: Number(row.downloads_today),
       subs: Number(row.subscribers_total),
+      release: row.date_updated ? row.date_updated.toISOString() : null,
     });
     map.set(row.plugin_id, list);
   }
@@ -991,6 +1030,11 @@ function sumDailySeries(lists: DailySeriesPoint[][]): DailySeriesPoint[] {
     total: lists.reduce((sum, l) => sum + (l[i]?.total ?? 0), 0),
     today: lists.reduce((sum, l) => sum + (l[i]?.today ?? 0), 0),
     subs: lists.reduce((sum, l) => sum + (l[i]?.subs ?? 0), 0),
+    // Author compare aggregates multiple plugins into one series -- a single
+    // plugin's release date doesn't mean anything at that level, so this is
+    // intentionally not populated (see getCompareData, which only exposes
+    // `releases` for type === "plugin").
+    release: null,
   }));
 }
 
@@ -998,6 +1042,10 @@ function extractMetricSeries(series: DailySeriesPoint[], metric: CompareMetric, 
   if (metric === "total") return series.slice(padCount).map((p) => p.total);
   if (metric === "subs") return series.slice(padCount).map((p) => p.subs);
   return rollingAvg7(series.map((p) => p.today)).slice(padCount);
+}
+
+function extractReleaseSeries(series: DailySeriesPoint[], padCount = 0): (string | null)[] {
+  return series.slice(padCount).map((p) => p.release);
 }
 
 // The aggregation itself is cheap (tag cloud is at most a few thousand
@@ -1310,6 +1358,7 @@ export async function getCompareData(type: CompareType, keys: number[], metric: 
         name: row.name,
         sub: `by ${row.author_name}`,
         series: extractMetricSeries(seriesMap.get(id) ?? [], metric, padCount),
+        releases: extractReleaseSeries(seriesMap.get(id) ?? [], padCount),
         stats: {
           all: Number(row.total_now),
           hot: Number(row.today_now),
@@ -1422,4 +1471,114 @@ export async function getAuthorIdBySlug(slug: string, game: string): Promise<num
     if (normalizeSlug(authorSlug) === target) return authorId;
   }
   return null;
+}
+
+// Upserted by wiki_page_id (not title/slug) so a later on-wiki title edit
+// updates the existing row instead of creating a duplicate -- see
+// packages/ingest/src/wikiUpdates.ts for where these come from.
+export async function upsertGameUpdates(updates: GameUpdateInput[]): Promise<number> {
+  if (updates.length === 0) return 0;
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const u of updates) {
+      await client.query(
+        `INSERT INTO game_updates (game, wiki_page_id, title, update_date, url, wiki_url)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (game, wiki_page_id) DO UPDATE SET
+           title = EXCLUDED.title,
+           update_date = EXCLUDED.update_date,
+           url = EXCLUDED.url,
+           wiki_url = EXCLUDED.wiki_url`,
+        [u.game, u.wikiPageId, u.title, u.date, u.url, u.wikiUrl],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+  return updates.length;
+}
+
+// Wholesale-replaces special_events from packages/ingest/data/special-
+// events.json on every sync (DELETE + reinsert in one transaction) rather
+// than upserting by key -- the JSON is hand-edited and small, and is the
+// single source of truth for this table, so a renamed/removed entry in the
+// file should disappear here too instead of leaving an orphaned row behind.
+export async function replaceSpecialEvents(events: SpecialEventInput[]): Promise<number> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM special_events");
+    for (const e of events) {
+      await client.query(`INSERT INTO special_events (game, title, start_date, end_date, url) VALUES ($1, $2, $3, $4, $5)`, [
+        e.game,
+        e.title,
+        e.start,
+        e.end,
+        e.url,
+      ]);
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+  return events.length;
+}
+
+// RuneLite and OSRS-via-mod.io are the same underlying game, so both read
+// the same game_updates/special_events rows -- an incoming "runelite" or
+// "osrs" GameKey normalizes to "oldschool" here before querying either
+// table, rather than every call site needing to know this.
+export function normalizeAnnotationGame(game: string): AnnotationGameKey {
+  return game === "runelite" || game === "osrs" ? "oldschool" : (game as AnnotationGameKey);
+}
+
+export async function getGameUpdates(game: string, from: string, to: string): Promise<GameUpdate[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT id, game, title, update_date, url, wiki_url
+     FROM game_updates
+     WHERE game = $1 AND update_date BETWEEN $2 AND $3
+     ORDER BY update_date ASC`,
+    [normalizeAnnotationGame(game), from, to],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    game: row.game,
+    title: row.title,
+    date: row.update_date.toISOString().slice(0, 10),
+    url: row.url,
+    wikiUrl: row.wiki_url,
+  }));
+}
+
+// Range-overlap, not a date equality check -- an event starting before
+// `from` and still running (or with no end at all) past it still overlaps
+// the requested window and should come back.
+export async function getSpecialEvents(game: string, from: string, to: string): Promise<SpecialEvent[]> {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT id, game, title, start_date, end_date, url
+     FROM special_events
+     WHERE game = $1 AND start_date <= $3 AND (end_date IS NULL OR end_date >= $2)
+     ORDER BY start_date ASC`,
+    [normalizeAnnotationGame(game), from, to],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    game: row.game,
+    title: row.title,
+    start: row.start_date.toISOString().slice(0, 10),
+    end: row.end_date ? row.end_date.toISOString().slice(0, 10) : null,
+    url: row.url,
+  }));
 }

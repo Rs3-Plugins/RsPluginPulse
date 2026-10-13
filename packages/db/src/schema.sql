@@ -101,6 +101,14 @@ CREATE TABLE IF NOT EXISTS plugin_snapshots (
   PRIMARY KEY (plugin_id, captured_at)
 );
 
+-- The plugin's own upstream "last updated" timestamp at the time of this
+-- snapshot, so trend charts can mark when the plugin itself was released/
+-- updated (not a game update) by diffing consecutive snapshots' values --
+-- see getPluginTrend. NULL on every snapshot taken before this column
+-- existed, so that detection only ever works from here forward, never
+-- retroactively.
+ALTER TABLE plugin_snapshots ADD COLUMN IF NOT EXISTS date_updated TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS plugin_snapshots_captured_at_idx
   ON plugin_snapshots (captured_at);
 
@@ -171,3 +179,44 @@ CREATE UNIQUE INDEX IF NOT EXISTS embed_cards_combo_idx
     show_stat_downloads, show_stat_week, show_stat_third, show_footer, show_image,
     accent_color, bg_color, text_color
   );
+
+-- Official game-update news posts, scraped weekly from the RuneScape wikis'
+-- Category:Game updates listings (see packages/ingest/src/wikiUpdates.ts).
+-- Surfaced on plugin trend charts as reference markers so a download spike
+-- or crash can be explained instead of just observed. Keyed by the wiki's
+-- own page id (not a slug) so a later title edit on-wiki doesn't orphan the
+-- row -- (game, wiki_page_id) is upserted in place instead.
+CREATE TABLE IF NOT EXISTS game_updates (
+  id SERIAL PRIMARY KEY,
+  game TEXT NOT NULL,
+  wiki_page_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  update_date DATE NOT NULL,
+  url TEXT NOT NULL,
+  wiki_url TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (game, wiki_page_id)
+);
+
+CREATE INDEX IF NOT EXISTS game_updates_game_date_idx ON game_updates (game, update_date);
+
+-- Hand-curated date ranges (Leagues seasons, Fresh Start Worlds, betas,
+-- etc.) worth flagging on trend charts, from packages/ingest/data/special-
+-- events.json -- see that file's README. No unique key / upsert here: the
+-- JSON is the source of truth and small (a handful of rows), so every sync
+-- just wholesale-replaces this table's contents (see
+-- replaceSpecialEvents in queries.ts) rather than tracking per-row
+-- identity across edits/renames.
+CREATE TABLE IF NOT EXISTS special_events (
+  id SERIAL PRIMARY KEY,
+  game TEXT NOT NULL,
+  title TEXT NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE,
+  url TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE special_events ADD COLUMN IF NOT EXISTS url TEXT;
+
+CREATE INDEX IF NOT EXISTS special_events_game_idx ON special_events (game, start_date);
