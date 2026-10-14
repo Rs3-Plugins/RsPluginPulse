@@ -57,6 +57,12 @@ ln -sfn "$RELEASE_DIR" "$APP_ROOT/current"
 log "Restarting rspluginpulse-api"
 sudo systemctl restart rspluginpulse-api
 
+# Best-effort: presence isn't on the API's health-check critical path, and
+# a box that hasn't re-run configure.sh yet (see "config drift" above)
+# won't have this unit at all.
+log "Restarting rspluginpulse-discord-bot"
+sudo systemctl restart rspluginpulse-discord-bot 2>/dev/null || true
+
 log "Waiting for http://127.0.0.1:${API_PORT}/api/status (max ${HEALTH_TIMEOUT}s)"
 healthy=0
 for ((i = 0; i < HEALTH_TIMEOUT; i++)); do
@@ -75,6 +81,7 @@ if [[ $healthy -ne 1 ]]; then
 fi
 
 sudo systemctl enable rspluginpulse-api >/dev/null 2>&1 || true
+sudo systemctl enable rspluginpulse-discord-bot >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------- prune
 log "Pruning old releases (keeping $KEEP_RELEASES)"

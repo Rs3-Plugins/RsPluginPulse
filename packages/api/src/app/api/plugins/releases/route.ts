@@ -1,6 +1,7 @@
 import { getPluginReleasesForIds } from "@rspluginpulse/db";
 import { CACHE_CEILING, remember } from "@/lib/cache";
 import { jsonWithCors, OPTIONS as corsOptions } from "@/lib/cors";
+import { isInt4 } from "@/lib/validate";
 
 export const OPTIONS = corsOptions;
 
@@ -16,7 +17,7 @@ export async function GET(request: Request) {
   const ids = idsParam
     .split(",")
     .map((s) => Number(s.trim()))
-    .filter((n) => Number.isInteger(n));
+    .filter((n) => isInt4(n));
   if (ids.length === 0) {
     return jsonWithCors({ error: { status: 400, message: "ids must be a comma-separated list of ids" } }, { status: 400 });
   }

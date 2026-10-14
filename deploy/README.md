@@ -28,7 +28,7 @@ start, wait for `/api/status`. A few seconds of downtime per deploy.
 | File | Runs | Purpose |
 |---|---|---|
 | `bootstrap.sh` | once, on the server as root | new service user, new Postgres role/db, scoped sudo |
-| `configure.sh` | on the server, re-appliable | nginx site, API systemd service, **ingest systemd timer (every 1h)**, GoAccess traffic dashboard |
+| `configure.sh` | on the server, re-appliable | nginx site, API systemd service, Discord bot systemd service, **ingest systemd timer (every 1h)**, GoAccess traffic dashboard |
 | `release.sh` | on the server, per deploy | swap release, apply schema, restart, health check |
 | `render-env.mjs` | in CI | builds `.env` from `.env.example` + GitHub secrets |
 | `../.github/workflows/deploy-api.yml` | GitHub Actions | build, ship, activate |
@@ -90,6 +90,8 @@ copy.
 | `SSH_KNOWN_HOSTS` | output of `ssh-keyscan -H <SERVER_IP>` |
 | `SSH_PORT` | only if not 22 |
 | `DISCORD_WEBHOOK_URL` | optional — ingest failure alerts |
+| `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | the dashboard's "Log in with Discord" OAuth2 app |
+| `DISCORD_BOT_TOKEN` | the bot's token — needed in production both by the API (bot-install flow, General tab nickname/avatar) and by `rspluginpulse-discord-bot` (presence) |
 | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` / `R2_PREFIX` | optional — only if moving the embed-card cache off local disk |
 
 **Variables** (not secrets):
@@ -97,6 +99,8 @@ copy.
 | Variable | Value |
 |---|---|
 | `API_PUBLIC_URL` | `https://api.rspluginpulse.com` — enables the post-deploy public health check |
+| `DISCORD_REDIRECT_URI` | `https://api.rspluginpulse.com/api/discord/oauth/callback` — must exactly match the Discord app's OAuth2 redirect |
+| `WEB_APP_URL` | `https://rspluginpulse.com` — dashboard origin, used for post-OAuth redirects and CORS |
 
 ### 5. Vercel
 
@@ -235,6 +239,8 @@ systemctl status rspluginpulse-api
 journalctl -u rspluginpulse-api -f
 curl -s localhost:8090/api/status | jq
 systemctl list-timers rspluginpulse-ingest
+systemctl status rspluginpulse-discord-bot   # presence-only bot, see packages/discord-bot
+journalctl -u rspluginpulse-discord-bot -f
 ```
 
 ## Request dashboard

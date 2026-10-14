@@ -367,3 +367,189 @@ export interface CompareResult {
   to: string;
   items: CompareItem[];
 }
+
+// "Log in with Discord" session (identify + guilds scopes) for the
+// /discord dashboard -- see docs/discord-bot.md. Separate from the (not
+// yet built) bot-install flow.
+export interface DiscordSession {
+  id: string;
+  discordUserId: string;
+  username: string;
+  avatarHash: string | null;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: Date;
+}
+
+// Shared by channel-topic bindings and per-entity announcement bindings --
+// both let you pick either a specific plugin or a specific author.
+export type DiscordEntityKind = "plugin" | "author";
+
+// A channel-topic binding (docs/discord-bot.md's "Channel description
+// templates") -- see schema.sql's comment on discord_channel_topics.
+export interface DiscordChannelTopic {
+  id: number;
+  guildId: string;
+  channelId: string;
+  channelName: string;
+  entityKind: DiscordEntityKind;
+  entityId: number;
+  entityName: string;
+  template: string;
+  lastRenderedTopic: string | null;
+  lastRenderedAt: Date | null;
+  createdAt: Date;
+}
+
+export interface DiscordChannelTopicInput {
+  guildId: string;
+  channelId: string;
+  channelName: string;
+  entityKind: DiscordEntityKind;
+  entityId: number;
+  entityName: string;
+  template: string;
+}
+
+// See schema.sql's comment on discord_guild_admins -- a hand-picked admin
+// of one specific guild's dashboard, distinct from "has Manage Server".
+export interface DiscordGuildAdmin {
+  id: number;
+  guildId: string;
+  discordUserId: string;
+  addedBy: string;
+  createdAt: Date;
+}
+
+// See schema.sql's comment on discord_guild_subscriptions -- the row
+// itself existing means the guild is subscribed; no row means free tier.
+export interface DiscordGuildSubscription {
+  guildId: string;
+  grantedBy: string;
+  createdAt: Date;
+}
+
+// See schema.sql's comment on site_admins -- a site-wide mod, distinct
+// from DiscordGuildAdmin above (which is scoped to one guild).
+export interface SiteAdmin {
+  id: number;
+  discordUserId: string;
+  addedBy: string;
+  createdAt: Date;
+}
+
+export type DiscordAnnouncementKind = "release" | "update";
+
+// Ping is three independent signals, not one mutually-exclusive mode --
+// see schema.sql's comment on discord_announcement_watches. pingHere and
+// pingEveryone are mutually exclusive with *each other* (enforced by a DB
+// CHECK), but either can be combined with any set of pingRoleIds.
+export interface DiscordPing {
+  pingHere: boolean;
+  pingEveryone: boolean;
+  pingRoleIds: string[];
+  pingRoleNames: string[];
+}
+
+// See schema.sql's comment on discord_announcement_watches -- the Global
+// tab's rows.
+export interface DiscordAnnouncementWatch extends DiscordPing {
+  id: number;
+  guildId: string;
+  channelId: string;
+  channelName: string;
+  kind: DiscordAnnouncementKind;
+  games: string[];
+  showThumbnail: boolean;
+  lastAnnouncedAt: Date;
+  createdAt: Date;
+}
+
+export interface DiscordAnnouncementWatchInput extends DiscordPing {
+  guildId: string;
+  channelId: string;
+  channelName: string;
+  kind: DiscordAnnouncementKind;
+  games: string[];
+  showThumbnail: boolean;
+}
+
+export type DiscordEntityAnnouncementKind = "release" | "update" | "both";
+
+// See schema.sql's comment on discord_entity_announcements -- the
+// Per-plugin/author tab's rows. entityKind 'author' means "any plugin
+// published/updated by this author", not a literal author-profile event.
+export interface DiscordEntityAnnouncement extends DiscordPing {
+  id: number;
+  guildId: string;
+  channelId: string;
+  channelName: string;
+  entityKind: DiscordEntityKind;
+  entityId: number;
+  entityName: string;
+  kind: DiscordEntityAnnouncementKind;
+  showThumbnail: boolean;
+  lastAnnouncedAt: Date;
+  createdAt: Date;
+}
+
+export interface DiscordEntityAnnouncementInput extends DiscordPing {
+  guildId: string;
+  channelId: string;
+  channelName: string;
+  entityKind: DiscordEntityKind;
+  entityId: number;
+  entityName: string;
+  kind: DiscordEntityAnnouncementKind;
+  showThumbnail: boolean;
+}
+
+// See schema.sql's comment on discord_guild_announcement_embed -- the
+// Embed builder tab's per-guild config, subscriber-gated.
+export interface DiscordGuildAnnouncementEmbed {
+  guildId: string;
+  color: string;
+  titleTemplate: string;
+  descriptionTemplate: string;
+  footerTemplate: string;
+  showThumbnail: boolean;
+  updatedAt: Date;
+}
+
+// See schema.sql's comment on discord_author_links -- global (not
+// per-guild), one row per (discordUserId, game).
+export type DiscordLinkGame = "runescape" | "runelite";
+
+export interface DiscordAuthorLink {
+  id: number;
+  discordUserId: string;
+  game: DiscordLinkGame;
+  authorId: number;
+  authorName: string;
+  linkedAt: string;
+}
+
+// A plugin (new, or with a genuine update) that's due to be announced --
+// what the detection queries in queries.ts hand to the discord-bot
+// posting tick, already carrying everything renderAnnouncementEmbed
+// needs without a second DB round trip per candidate.
+export interface AnnouncementCandidate {
+  kind: DiscordAnnouncementKind;
+  pluginId: number;
+  pluginName: string;
+  pluginNameId: string;
+  game: string;
+  authorName: string;
+  authorAvatarUrl: string | null;
+  profileUrl: string;
+  logoUrl: string | null;
+  // The timestamp this candidate actually happened at (plugins.date_added
+  // for a release candidate, plugin_releases.released_at for an update) --
+  // watch/binding cursors advance to the max of these, not to "now", so a
+  // slightly-late tick never skips something that happened just before it
+  // ran.
+  occurredAt: Date;
+  version: string | null;
+  changelog: string | null;
+  releaseUrl: string | null;
+}

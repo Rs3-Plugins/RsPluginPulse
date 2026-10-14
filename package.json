@@ -9,6 +9,7 @@
     "migrate": "npm run migrate -w @rspluginpulse/db",
     "ingest": "npm run ingest -w @rspluginpulse/ingest",
     "ingest:runelite": "npm run ingest:runelite -w @rspluginpulse/ingest",
+    "discord-bot": "npm run start -w @rspluginpulse/discord-bot",
     "dev:api": "npm run dev -w @rspluginpulse/api",
     "dev:web": "npm run dev -w @rspluginpulse/web",
     "build:api": "npm run build -w @rspluginpulse/api",

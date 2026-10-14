@@ -2,16 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useGame, type Game } from "../context/GameContext";
 import { getRandomPlugin, getStatus } from "../api";
+import { useDiscordAuth } from "../discord/DiscordAuthContext";
+import { ProfileMenu } from "../discord/ProfileMenu";
+import { useTheme } from "../hooks/useTheme";
 import { GameSwitcher, VISIBLE_GAMES } from "./GameSwitcher";
 import { HeaderSearch } from "./HeaderSearch";
+import { CloseIcon, CoffeeIcon, DiceIcon, MenuIcon, ThemeIcon } from "./icons";
 import { pluginHref } from "../lib/links";
-
-type Theme = "dark" | "light";
-
-function readStoredTheme(): Theme {
-  const stored = localStorage.getItem("theme");
-  return stored === "light" ? "light" : "dark";
-}
 
 const NAV_LINKS: { to: string; label: string; match: (path: string) => boolean }[] = [
   { to: "/", label: "Leaderboard", match: (p) => p === "/" },
@@ -21,7 +18,8 @@ const NAV_LINKS: { to: string; label: string; match: (path: string) => boolean }
 ];
 
 export function Header() {
-  const [theme, setTheme] = useState<Theme>(readStoredTheme);
+  const [theme, toggleTheme] = useTheme();
+  const { signedIn, user, logOut } = useDiscordAuth();
   const { game, setGame } = useGame();
   const navigate = useNavigate();
   const location = useLocation();
@@ -40,15 +38,6 @@ export function Header() {
     setRolling(false);
     if (result) navigate(pluginHref(result.nameId, game));
   }
-
-  function toggleTheme() {
-    setTheme(theme === "dark" ? "light" : "dark");
-  }
-
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("theme", theme);
-  }, [theme]);
 
   useEffect(() => {
     let updatedAt: number | null = null;
@@ -110,17 +99,19 @@ export function Header() {
         </nav>
 
         <div className="pp-actions">
-          <a
-            className="pp-discord pp-tip"
-            href="https://discord.gg/gHN7c9B5FU"
-            target="_blank"
-            rel="noopener"
-            data-tooltip="Add the PluginPulse bot to your Discord server"
-            aria-label="Add the PluginPulse bot to your Discord server"
-          >
-            <img src="/icons/game-controller.svg" alt="" width={15} height={15} />
-            Add to Discord
-          </a>
+          {signedIn && user ? (
+            <ProfileMenu user={user} />
+          ) : (
+            <Link
+              className="pp-discord pp-tip"
+              to="/discord"
+              data-tooltip="Add the PluginPulse bot to your Discord server"
+              aria-label="Add the PluginPulse bot to your Discord server"
+            >
+              <img src="/icons/game-controller.svg" alt="" width={15} height={15} />
+              Add to Discord
+            </Link>
+          )}
           <span className="pp-divider" aria-hidden="true" />
 
           <HeaderSearch />
@@ -190,15 +181,36 @@ export function Header() {
                 </Link>
               );
             })}
-            <a className="pp-drawer__discord" href="https://discord.gg/gHN7c9B5FU" target="_blank" rel="noopener">
-              <span className="pp-drawer__plus">
-                <img src="/icons/game-controller.svg" alt="" width={18} height={18} />
-              </span>
-              <span>
-                <b>Add to Discord</b>
-                <small>Add the PluginPulse bot to your server</small>
-              </span>
-            </a>
+            {signedIn && user ? (
+              <>
+                <Link className="pp-drawer__discord" to="/discord/servers">
+                  <img src={user.avatarUrl} alt="" className="pp-drawer__plus dc-hdr__avatar" width={32} height={32} />
+                  <span>
+                    <b>{user.username}</b>
+                    <small>View your servers</small>
+                  </span>
+                </Link>
+                <button
+                  type="button"
+                  className="pp-drawer__item"
+                  onClick={() => {
+                    logOut();
+                  }}
+                >
+                  Log out
+                </button>
+              </>
+            ) : (
+              <Link className="pp-drawer__discord" to="/discord">
+                <span className="pp-drawer__plus">
+                  <img src="/icons/game-controller.svg" alt="" width={18} height={18} />
+                </span>
+                <span>
+                  <b>Add to Discord</b>
+                  <small>Add the PluginPulse bot to your server</small>
+                </span>
+              </Link>
+            )}
             <a className="pp-drawer__discord pp-drawer__coffee" href="https://ko-fi.com/mark7625" target="_blank" rel="noopener">
               <span className="pp-drawer__plus">
                 <CoffeeIcon />
@@ -251,62 +263,7 @@ export function Header() {
   );
 }
 
-function CoffeeIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2.5 6.5h9v3.5a3 3 0 01-3 3h-3a3 3 0 01-3-3V6.5Z" />
-      <path d="M11.5 7h1a1.8 1.8 0 010 3.6h-1" />
-      <path d="M5.2 4.3c-.4-.5-.4-1 0-1.6M7.8 4.3c-.4-.5-.4-1 0-1.6" />
-    </svg>
-  );
-}
-
-function DiceIcon({ rolling }: { rolling: boolean }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" className={`dice-icon ${rolling ? "rolling" : ""}`}>
-      <rect x="1.5" y="1.5" width="13" height="13" rx="3" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <circle cx="5" cy="5" r="1.1" fill="currentColor" />
-      <circle cx="11" cy="5" r="1.1" fill="currentColor" />
-      <circle cx="8" cy="8" r="1.1" fill="currentColor" />
-      <circle cx="5" cy="11" r="1.1" fill="currentColor" />
-      <circle cx="11" cy="11" r="1.1" fill="currentColor" />
-    </svg>
-  );
-}
-
-function ThemeIcon({ theme }: { theme: Theme }) {
-  if (theme === "dark") {
-    return (
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-        <circle cx="8" cy="8" r="3" />
-        <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M3.5 12.5l1.4-1.4M11.1 4.9l1.4-1.4" />
-      </svg>
-    );
-  }
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M13.8 9.9A5.8 5.8 0 116.1 2.2a4.6 4.6 0 107.7 7.7Z" />
-    </svg>
-  );
-}
-
-function MenuIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-      <path d="M3 5h12M3 9h12M3 13h12" />
-    </svg>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-      <path d="M3 3l10 10M13 3L3 13" />
-    </svg>
-  );
-}
-
-function brandEyebrow(game: Game): string {
+export function brandEyebrow(game: Game): string {
   if (game === "osrs") return "OLD SCHOOL";
   if (game === "runelite") return "RUNELITE";
   return "RUNESCAPE";
