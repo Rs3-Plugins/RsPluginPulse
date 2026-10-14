@@ -337,6 +337,13 @@ export function getPluginReleasesBatch(ids: number[]) {
   return getJson<{ releases: Record<number, PluginRelease[]> }>(`/api/plugins/releases?ids=${ids.join(",")}`);
 }
 
+// Batch form for the author page's plugin-list sparklines -- every plugin
+// the author has in one request, rather than a /api/plugins/{id}/trend call
+// (full snapshot history) per plugin.
+export function getPluginSparklines(ids: number[], game: Game = "runescape", days = 20) {
+  return getJson<{ sparklines: Record<number, number[]> }>(`/api/plugins/sparklines?ids=${ids.join(",")}&game=${game}&days=${days}`);
+}
+
 export function getGameUpdates(game: Game, from: string, to: string) {
   return getJson<{ updates: GameUpdate[] }>(`/api/game-updates?game=${game}&from=${from}&to=${to}`);
 }

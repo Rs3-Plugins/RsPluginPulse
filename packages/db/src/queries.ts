@@ -1324,6 +1324,22 @@ async function getDailySeriesByPlugin(
   return map;
 }
 
+// Batch form for the author page's plugin-list sparklines -- one query for
+// every one of the author's plugins at once (reusing getDailySeriesByPlugin,
+// same as Compare and getFastestGrowingWithSpark below), instead of the N
+// separate full-history /api/plugins/{id}/trend requests the page used to
+// fan out to (one per plugin, each rebuilding that plugin's entire
+// snapshot history just to keep the last `days` points of it).
+export async function getPluginSparklines(pluginIds: number[], game: string, days = 20): Promise<Map<number, number[]>> {
+  if (pluginIds.length === 0) return new Map();
+  const seriesMap = await getDailySeriesByPlugin(pluginIds, daysAgoDate(days - 1), daysAgoDate(0), game);
+  const result = new Map<number, number[]>();
+  for (const id of pluginIds) {
+    result.set(id, (seriesMap.get(id) ?? []).map((p) => p.total));
+  }
+  return result;
+}
+
 function sumDailySeries(lists: DailySeriesPoint[][]): DailySeriesPoint[] {
   const longest = lists.reduce((best, l) => (l.length > best.length ? l : best), lists[0] ?? []);
   return longest.map((point, i) => ({

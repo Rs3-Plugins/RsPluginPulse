@@ -15,7 +15,9 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const state = searchParams.get("state");
-  const webAppUrl = process.env.WEB_APP_URL ?? "/";
+  // `||`, not `??` -- a rendered-but-empty env var ("") is not nullish, so
+  // `??` would never fall back from it.
+  const webAppUrl = process.env.WEB_APP_URL || "/";
 
   // Bot-install: nothing to exchange or verify -- whether the bot actually
   // ended up installed is checked independently (fetchBotGuildIds, via the

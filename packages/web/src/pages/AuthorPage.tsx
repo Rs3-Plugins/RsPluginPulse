@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { API_BASE, getAuthorProfile, getPluginTrend, type AuthorProfile } from "../api";
+import { API_BASE, getAuthorProfile, getPluginSparklines, type AuthorProfile } from "../api";
 import { useGame, type Game } from "../context/GameContext";
 import { authorHref, pluginHref } from "../lib/links";
 import { slugifyTag as slugify } from "../lib/slug";
@@ -38,6 +38,7 @@ export function AuthorPage() {
   const [error, setError] = useState<string | null>(null);
   const sort = parseSort(searchParams.get("sort"));
   const [sparklines, setSparklines] = useState<Record<number, string | null>>({});
+  const [sparklinesLoading, setSparklinesLoading] = useState(true);
 
   function setSort(next: SortKey) {
     const params = new URLSearchParams();
@@ -84,19 +85,23 @@ export function AuthorPage() {
   useEffect(() => {
     if (!author) return;
     let cancelled = false;
-    Promise.all(
-      author.plugins.map(async (p) => {
-        try {
-          const { trend } = await getPluginTrend(p.id);
-          const points = trend.slice(-30).map((t) => t.downloadsTotal);
+    setSparklines({});
+    setSparklinesLoading(true);
+    getPluginSparklines(author.plugins.map((p) => p.id), author.game as Game, 20)
+      .then(({ sparklines: byId }) => {
+        if (cancelled) return;
+        const entries = author.plugins.map((p) => {
+          const points = byId[p.id] ?? [];
           return [p.id, points.length >= 2 ? sparklinePath(points, 84, 24) : null] as const;
-        } catch {
-          return [p.id, null] as const;
-        }
-      }),
-    ).then((entries) => {
-      if (!cancelled) setSparklines(Object.fromEntries(entries));
-    });
+        });
+        setSparklines(Object.fromEntries(entries));
+      })
+      .catch(() => {
+        if (!cancelled) setSparklines({});
+      })
+      .finally(() => {
+        if (!cancelled) setSparklinesLoading(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -281,11 +286,15 @@ export function AuthorPage() {
                 since {new Date(p.dateAdded).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
               </span>
             </span>
-            <svg width="84" height="24" viewBox="0 0 84 24" preserveAspectRatio="none" className="hot-spark">
-              {sparklines[p.id] && (
-                <path d={sparklines[p.id]!} fill="none" stroke="var(--gold)" strokeWidth="1.5" strokeLinejoin="round" />
-              )}
-            </svg>
+            {sparklinesLoading ? (
+              <span className="skeleton-bar" style={{ width: 84, height: 24 }} />
+            ) : (
+              <svg width="84" height="24" viewBox="0 0 84 24" preserveAspectRatio="none" className="hot-spark">
+                {sparklines[p.id] && (
+                  <path d={sparklines[p.id]!} fill="none" stroke="var(--gold)" strokeWidth="1.5" strokeLinejoin="round" />
+                )}
+              </svg>
+            )}
             <span className="cell-value">{p.downloadsTotal.toLocaleString()}</span>
             <span className="cell-value muted">
               {p.weeklyGain >= 0 ? "+" : ""}

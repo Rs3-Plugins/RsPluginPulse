@@ -26,7 +26,9 @@ export function downloadsUnit(game: string): string {
 }
 
 export function siteUrl(path: string): string {
-  const base = (process.env.WEB_APP_URL ?? "https://rspluginpulse.com").replace(/\/$/, "");
+  // `||`, not `??` -- a rendered-but-empty env var ("") is not nullish, so
+  // `??` would never fall back from it (see cardImageUrl below).
+  const base = (process.env.WEB_APP_URL || "https://rspluginpulse.com").replace(/\/$/, "");
   return `${base}${path}`;
 }
 
@@ -39,7 +41,8 @@ export function siteUrl(path: string): string {
 // both games (see resolveEntity.ts), so no ?game= query param is needed
 // here.
 export function cardImageUrl(type: "plugin" | "author", entityId: number): string {
-  const base = (process.env.API_BASE_URL ?? "https://api.rspluginpulse.com").replace(/\/$/, "");
+  // `||`, not `??` -- same reasoning as siteUrl above.
+  const base = (process.env.API_BASE_URL || "https://api.rspluginpulse.com").replace(/\/$/, "");
   return `${base}/api/card/${type}/${entityId}.png`;
 }
 
