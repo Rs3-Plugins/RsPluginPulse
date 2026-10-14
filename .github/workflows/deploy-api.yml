@@ -79,6 +79,7 @@ jobs:
           DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
           DISCORD_REDIRECT_URI: ${{ vars.DISCORD_REDIRECT_URI }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          SITE_OWNER_DISCORD_IDS: ${{ secrets.SITE_OWNER_DISCORD_IDS }}
           WEB_APP_URL: ${{ vars.WEB_APP_URL }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
