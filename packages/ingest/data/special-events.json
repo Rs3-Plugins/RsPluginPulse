@@ -59,7 +59,14 @@
     "game": "runescape",
     "title": "Plugin Beta",
     "start": "2026-10-06",
-    "end": null,
+    "end": "2026-10-19",
     "url": "https://runescape.wiki/w/Plugin_beta"
+  },
+  {
+    "game": "runescape",
+    "title": "Plugin System Release",
+    "start": "2026-10-19",
+    "end": "2026-10-26",
+    "url": null
   }
 ]
