@@ -471,11 +471,6 @@ export async function upsertPluginsAndSnapshot(mods: IngestedMod[], capturedAt: 
   }
 }
 
-// Plugins tagged as libraries for other plugins are excluded from
-// leaderboard rankings -- their download counts are inflated by being
-// pulled in as a dependency rather than installed for their own sake.
-const LEADERBOARD_EXCLUDED_TAG = "Library for other Plugins";
-
 // RuneLite's downloads_total is a live "currently reporting installs" gauge,
 // not a cumulative counter (see ingest/runelite.ts), so it naturally drifts
 // up and down hour to hour. Diffing two single snapshots picks up that
@@ -513,10 +508,10 @@ async function topPluginsByLatestMetric(metric: "downloads_total" | "downloads_t
        SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
      ) l ON true
      ${CO_AUTHOR_NAMES_JOIN}
-     WHERE p.game = $3 AND NOT ($2 = ANY(p.tags))
+     WHERE p.game = $2
      ORDER BY value DESC
      LIMIT $1`,
-    [limit, LEADERBOARD_EXCLUDED_TAG, game],
+    [limit, game],
   );
   const authorSlugs = await getAuthorSlugMap(game);
   return rows.map((row) => toPluginRow(row, authorSlugs));
@@ -538,21 +533,21 @@ async function topPluginsByGain(cutoffDays: number, game: string, limit: number)
      ) l ON true
      LEFT JOIN LATERAL (
        SELECT avg(downloads_total) AS downloads_total
-       FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at >= now() - ($5 * interval '1 day')
+       FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at >= now() - ($4 * interval '1 day')
      ) nowavg ON true
      LEFT JOIN LATERAL (
        SELECT avg(downloads_total) AS downloads_total
        FROM plugin_snapshots s WHERE s.plugin_id = p.id
-         AND s.captured_at BETWEEN now() - (($2 + $5) * interval '1 day') AND now() - (($2 - $5) * interval '1 day')
+         AND s.captured_at BETWEEN now() - (($2 + $4) * interval '1 day') AND now() - (($2 - $4) * interval '1 day')
      ) b1 ON true
      LEFT JOIN LATERAL (
        SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at ASC LIMIT 1
      ) b2 ON true
      ${CO_AUTHOR_NAMES_JOIN}
-     WHERE p.game = $4 AND NOT ($3 = ANY(p.tags))
+     WHERE p.game = $3
      ORDER BY value DESC
      LIMIT $1`,
-    [limit, cutoffDays, LEADERBOARD_EXCLUDED_TAG, game, windowDays],
+    [limit, cutoffDays, game, windowDays],
   );
   const authorSlugs = await getAuthorSlugMap(game);
   return rows.map((row) => toPluginRow(row, authorSlugs));
@@ -589,22 +584,22 @@ export async function getPluginRanks(pluginIds: number[], metric: "alltime" | "h
          isHotGain
            ? `LEFT JOIN LATERAL (
                 SELECT avg(downloads_total) AS downloads_total
-                FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at >= now() - ($4 * interval '1 day')
+                FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at >= now() - ($3 * interval '1 day')
               ) nowavg ON true
               LEFT JOIN LATERAL (
                 SELECT avg(downloads_total) AS downloads_total
                 FROM plugin_snapshots s WHERE s.plugin_id = p.id
-                  AND s.captured_at BETWEEN now() - ((1 + $4) * interval '1 day') AND now() - ((1 - $4) * interval '1 day')
+                  AND s.captured_at BETWEEN now() - ((1 + $3) * interval '1 day') AND now() - ((1 - $3) * interval '1 day')
               ) b1 ON true
               LEFT JOIN LATERAL (
                 SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at ASC LIMIT 1
               ) b2 ON true`
            : ""
        }
-       WHERE p.game = $2 AND NOT ($3 = ANY(p.tags))
+       WHERE p.game = $2
      )
      SELECT id, rank FROM ranked WHERE id = ANY($1::int[])`,
-    isHotGain ? [pluginIds, game, LEADERBOARD_EXCLUDED_TAG, windowDays] : [pluginIds, game, LEADERBOARD_EXCLUDED_TAG],
+    isHotGain ? [pluginIds, game, windowDays] : [pluginIds, game],
   );
   return new Map(rows.map((row) => [row.id, Number(row.rank)]));
 }
@@ -638,21 +633,21 @@ export async function getFastestGrowingPlugins(limit = 5, cutoffDays = 7, game =
      ) l ON true
      LEFT JOIN LATERAL (
        SELECT avg(downloads_total) AS downloads_total, avg(subscribers_total) AS subscribers_total
-       FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at >= now() - ($5 * interval '1 day')
+       FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at >= now() - ($4 * interval '1 day')
      ) nowavg ON true
      LEFT JOIN LATERAL (
        SELECT avg(downloads_total) AS downloads_total, avg(subscribers_total) AS subscribers_total
        FROM plugin_snapshots s WHERE s.plugin_id = p.id
-         AND s.captured_at BETWEEN now() - (($2 + $5) * interval '1 day') AND now() - (($2 - $5) * interval '1 day')
+         AND s.captured_at BETWEEN now() - (($2 + $4) * interval '1 day') AND now() - (($2 - $4) * interval '1 day')
      ) b1 ON true
      LEFT JOIN LATERAL (
        SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at ASC LIMIT 1
      ) b2 ON true
      ${CO_AUTHOR_NAMES_JOIN}
-     WHERE p.game = $4 AND NOT ($3 = ANY(p.tags))
+     WHERE p.game = $3
      ORDER BY growth_score DESC
      LIMIT $1`,
-    [limit, cutoffDays, LEADERBOARD_EXCLUDED_TAG, game, windowDays],
+    [limit, cutoffDays, game, windowDays],
   );
   const authorSlugs = await getAuthorSlugMap(game);
   return rows
@@ -722,7 +717,7 @@ export async function getTopAuthors(period: Period, limit = 50, game = "runescap
        ${
          needsGainJoins
            ? `LEFT JOIN LATERAL (
-                SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at <= now() - ($4 * interval '1 day')
+                SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at <= now() - ($3 * interval '1 day')
                 ORDER BY s.captured_at DESC LIMIT 1
               ) b1 ON true
               LEFT JOIN LATERAL (
@@ -730,7 +725,7 @@ export async function getTopAuthors(period: Period, limit = 50, game = "runescap
               ) b2 ON true`
            : ""
        }
-       WHERE p.game = $2 AND NOT ($3 = ANY(p.tags))
+       WHERE p.game = $2
      ),
      ranked AS (
        SELECT *, ROW_NUMBER() OVER (PARTITION BY author_id ORDER BY value DESC) AS rn FROM per_plugin
@@ -744,7 +739,7 @@ export async function getTopAuthors(period: Period, limit = 50, game = "runescap
      GROUP BY author_id
      ORDER BY value DESC, author_id ASC
      LIMIT $1`,
-    needsGainJoins ? [limit, game, LEADERBOARD_EXCLUDED_TAG, cutoffDays] : [limit, game, LEADERBOARD_EXCLUDED_TAG],
+    needsGainJoins ? [limit, game, cutoffDays] : [limit, game],
   );
 
   const authorSlugs = await getAuthorSlugMap(game);
@@ -794,26 +789,26 @@ export async function getAuthorRanks(authorIds: number[], period: Period, game =
          needsGainJoins
            ? `LEFT JOIN LATERAL (
                 SELECT avg(downloads_total) AS downloads_total
-                FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at >= now() - ($5 * interval '1 day')
+                FROM plugin_snapshots s WHERE s.plugin_id = p.id AND s.captured_at >= now() - ($4 * interval '1 day')
               ) nowavg ON true
               LEFT JOIN LATERAL (
                 SELECT avg(downloads_total) AS downloads_total
                 FROM plugin_snapshots s WHERE s.plugin_id = p.id
-                  AND s.captured_at BETWEEN now() - (($4 + $5) * interval '1 day') AND now() - (($4 - $5) * interval '1 day')
+                  AND s.captured_at BETWEEN now() - (($3 + $4) * interval '1 day') AND now() - (($3 - $4) * interval '1 day')
               ) b1 ON true
               LEFT JOIN LATERAL (
                 SELECT * FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at ASC LIMIT 1
               ) b2 ON true`
            : ""
        }
-       WHERE p.game = $2 AND NOT ($3 = ANY(p.tags))
+       WHERE p.game = $2
        GROUP BY p.author_id
      ),
      ranked AS (
        SELECT author_id, RANK() OVER (ORDER BY value DESC) AS rank FROM per_author
      )
      SELECT author_id, rank FROM ranked WHERE author_id = ANY($1::int[])`,
-    needsGainJoins ? [authorIds, game, LEADERBOARD_EXCLUDED_TAG, cutoffDays, windowDays] : [authorIds, game, LEADERBOARD_EXCLUDED_TAG],
+    needsGainJoins ? [authorIds, game, cutoffDays, windowDays] : [authorIds, game],
   );
   return new Map(rows.map((row) => [row.author_id, Number(row.rank)]));
 }
@@ -884,7 +879,6 @@ export async function searchPluginsAndAuthors(
        SELECT downloads_total FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
      ) l ON true
      WHERE p.game = $2
-       AND NOT ($3 = ANY(p.tags))
        AND (
          p.name ILIKE '%' || $1 || '%'
          OR EXISTS (
@@ -892,8 +886,8 @@ export async function searchPluginsAndAuthors(
          )
        )
      ORDER BY total DESC
-     LIMIT $4`,
-    [q, game, LEADERBOARD_EXCLUDED_TAG, pluginLimit],
+     LIMIT $3`,
+    [q, game, pluginLimit],
   );
 
   const authorsResult = await pool.query(
@@ -905,15 +899,15 @@ export async function searchPluginsAndAuthors(
        JOIN LATERAL (
          SELECT downloads_total FROM plugin_snapshots s WHERE s.plugin_id = p.id ORDER BY s.captured_at DESC LIMIT 1
        ) l ON true
-       WHERE p.game = $2 AND NOT ($3 = ANY(p.tags))
+       WHERE p.game = $2
        GROUP BY pa.author_id
      )
      SELECT author_id, author_name, author_avatar_url, plugin_count, total
      FROM agg
      WHERE author_name ILIKE '%' || $1 || '%'
      ORDER BY total DESC
-     LIMIT $4`,
-    [q, game, LEADERBOARD_EXCLUDED_TAG, authorLimit],
+     LIMIT $3`,
+    [q, game, authorLimit],
   );
 
   const authorSlugs = await getAuthorSlugMap(game);
