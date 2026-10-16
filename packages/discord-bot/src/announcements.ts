@@ -34,6 +34,25 @@ const ALL_GAMES = ["runescape", "runelite"];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// A post that succeeds followed by a cursor write that throws (a transient
+// DB hiccup) used to leave last_announced_at stuck at its old value --
+// invisible until the *next* tick re-fetched the same already-posted
+// candidate and sent it to Discord a second time. Retrying the write a
+// few times closes that window without changing the "only advance after a
+// successful post" contract above.
+async function markAnnouncedWithRetry(mark: () => Promise<void>, context: string): Promise<void> {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await mark();
+      return;
+    } catch (error) {
+      console.error(`Failed to persist announcement cursor for ${context} (attempt ${attempt}/3):`, error);
+      if (attempt < 3) await sleep(1000 * attempt);
+    }
+  }
+  console.error(`Giving up persisting announcement cursor for ${context} after 3 attempts -- next tick may repost this candidate.`);
+}
+
 // Discord only actually *notifies* a role/@here/@everyone mention in
 // content if allowed_mentions explicitly opts into it -- otherwise it
 // renders as inert plain text. "everyone" as a parse type covers both
@@ -129,7 +148,7 @@ export async function runAnnouncements(client: Client<true>): Promise<void> {
         // everything already sent next time around. Only skipped on an
         // outright post failure, so a genuinely failed one gets retried
         // next tick instead of silently skipped.
-        if (posted) await markAnnouncementWatchAnnounced(watch.id, candidate.occurredAt);
+        if (posted) await markAnnouncedWithRetry(() => markAnnouncementWatchAnnounced(watch.id, candidate.occurredAt), `watch ${watch.id}`);
         await sleep(DELAY_BETWEEN_POSTS_MS);
       }
     } catch (error) {
@@ -152,7 +171,7 @@ export async function runAnnouncements(client: Client<true>): Promise<void> {
       const embedConfig = await embedFor(binding.guildId);
       for (const candidate of candidates) {
         const posted = await postAnnouncement(client, binding.channelId, candidate, embedConfig, binding.showThumbnail, binding);
-        if (posted) await markEntityAnnouncementAnnounced(binding.id, candidate.occurredAt);
+        if (posted) await markAnnouncedWithRetry(() => markEntityAnnouncementAnnounced(binding.id, candidate.occurredAt), `entity binding ${binding.id}`);
         await sleep(DELAY_BETWEEN_POSTS_MS);
       }
     } catch (error) {
